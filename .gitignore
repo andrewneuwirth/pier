@@ -1,0 +1,12 @@
+.build/
+build/
+UsageRings.xcodeproj/
+
+# Local credentials and machine files
+.env
+.env.*
+!.env.example
+!.env.sample
+.DS_Store
+*.pem
+*.key
