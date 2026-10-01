@@ -69,7 +69,7 @@ down entirely** while the display sleeps, refreshing the moment it wakes.
 ```sh
 ./build.sh              # build/UsageRings.app
 ./build.sh --install    # into /Applications, and launch
-./Tools/makeicon.sh     # re-render Resources/UsageRings.icns from Icon.svg
+./scripts/makeicon.sh   # re-render Resources/UsageRings.icns from Icon.svg
 ```
 
 `UsageRings --dump` prints what the rings would draw, through the same fetch
