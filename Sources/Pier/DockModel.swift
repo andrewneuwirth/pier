@@ -43,6 +43,9 @@ struct GroupsFile: Codable {
         var url: String
         /// The project folder, under ~/Developer, whose icon this link shows (Projects lists only).
         var path: String?
+        /// For a server on this Mac: the shell command that starts it, run in that folder (Projects'
+        /// own launch command). Without one, the row shows status only.
+        var start: String?
         var id: String { url }
     }
 
@@ -301,7 +304,8 @@ final class DockModel {
             if !address.contains("://") { address = "https://" + address }
             guard seen.insert(address).inserted else { return nil }
             let title = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return GroupsFile.Link(title: title.isEmpty ? (URL(string: address)?.host() ?? address) : title, url: address, path: link.path)
+            return GroupsFile.Link(title: title.isEmpty ? (URL(string: address)?.host() ?? address) : title, url: address,
+                                   path: link.path, start: link.start)
         }
         guard cleaned != links(kind) else { return }
         store(cleaned, kind)

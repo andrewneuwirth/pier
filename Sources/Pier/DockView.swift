@@ -810,8 +810,26 @@ struct LinksList: View {
     @FocusState private var focused: UUID?
 
     /// An editable row; its own id, since a half-typed address can be empty or repeat another.
-    struct Draft: Identifiable { let id = UUID(); var title: String; var url: String; var path: String? }
+    struct Draft: Identifiable { let id = UUID(); var title: String; var url: String; var path: String?; var start: String? }
     @State private var listening: Set<Int> = []   // local ports with a server answering
+    @State private var busy: Set<String> = []       // servers starting or stopping
+
+    /// ▶ starts the server with its command; ■ stops whatever listens on its port. Then the dot
+    /// follows the port for up to ~30 s, until the change shows.
+    private func toggleServer(_ link: GroupsFile.Link) {
+        guard let port = LocalServers.port(of: link), !busy.contains(link.id) else { return }
+        let starting = !listening.contains(port)
+        if starting { LocalServers.start(link) } else { LocalServers.stop(port: port) }
+        busy.insert(link.id)
+        Task {
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(1))
+                listening = await LocalServers.listening(model.links(kind))
+                if listening.contains(port) == starting { break }
+            }
+            busy.remove(link.id)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MT.Space.s6) {
@@ -822,7 +840,7 @@ struct LinksList: View {
                     Button("Done") { save() }.buttonStyle(.glassProminent).controlSize(.small)
                 } else {
                     Button("Edit") {
-                        draft = model.links(kind).map { Draft(title: $0.title, url: $0.url, path: $0.path) }
+                        draft = model.links(kind).map { Draft(title: $0.title, url: $0.url, path: $0.path, start: $0.start) }
                         editing = true
                     }
                     .buttonStyle(.glass).controlSize(.small)
@@ -843,7 +861,8 @@ struct LinksList: View {
                 .font(.system(size: 12)).foregroundStyle(Color.mtInkMuted).fixedSize(horizontal: false, vertical: true)
         }
         ForEach(model.links(kind)) { link in
-            LinkRow(link: link, running: LocalServers.port(of: link).map { listening.contains($0) }) {
+            LinkRow(link: link, running: LocalServers.port(of: link).map { listening.contains($0) },
+                    busy: busy.contains(link.id), toggle: { toggleServer(link) }) {
                 close()
                 if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
             }
@@ -912,7 +931,7 @@ struct LinksList: View {
     }
 
     private func save() {
-        model.setLinks(draft.map { GroupsFile.Link(title: $0.title, url: $0.url, path: $0.path) }, for: kind)
+        model.setLinks(draft.map { GroupsFile.Link(title: $0.title, url: $0.url, path: $0.path, start: $0.start) }, for: kind)
         editing = false
     }
 }
@@ -921,6 +940,8 @@ private struct LinkRow: View {
     let link: GroupsFile.Link
     /// nil for sites on the internet; true/false for a server on this Mac.
     var running: Bool? = nil
+    var busy = false
+    var toggle: (() -> Void)? = nil
     let open: () -> Void
     @State private var hovering = false
 
@@ -941,6 +962,20 @@ private struct LinkRow: View {
                 Circle().fill(running ? Color.mtGood : Color.mtRingTrack).frame(width: 7, height: 7)
                     .help(running ? "Running" : "Not running")
                     .accessibilityLabel(running ? "Running" : "Not running")
+                // Start needs a command; stop works on any server listening on the port.
+                if let toggle, running || link.start != nil {
+                    Button(action: toggle) {
+                        Group {
+                            if busy { ProgressView().controlSize(.mini) }
+                            else { Image(systemName: running ? "stop.fill" : "play.fill").font(.system(size: 10, weight: .semibold)) }
+                        }
+                        .frame(width: 24, height: 24)
+                        .background(Color.mtFillHover, in: .circle)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Color.mtInk)
+                    .help(running ? "Stop \(link.title)" : "Start \(link.title)")
+                    .accessibilityLabel(running ? "Stop \(link.title)" : "Start \(link.title)")
+                }
             }
         }
         .padding(.horizontal, MT.Space.s8)
@@ -999,6 +1034,43 @@ enum LocalServers {
     static func listening(_ links: [GroupsFile.Link]) async -> Set<Int> {
         let ports = Set(links.compactMap(port(of:)))
         return await Task.detached(priority: .userInitiated) { Set(ports.filter(isOpen)) }.value
+    }
+
+    /// Runs the link's start command in its project folder, detached, logging to ~/Library/Logs/Pier.
+    /// An interactive login shell, so the PATH has what the terminal has (pnpm, npm, uv).
+    @MainActor
+    static func start(_ link: GroupsFile.Link) {
+        guard let command = link.start, let path = link.path else { return }
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Developer").appendingPathComponent(path)
+        let logs = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Pier")
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let log = logs.appendingPathComponent("\(link.title).log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-ilc", command]
+        process.currentDirectoryURL = folder
+        if let handle = try? FileHandle(forWritingTo: log) {
+            process.standardOutput = handle
+            process.standardError = handle
+        }
+        process.standardInput = FileHandle.nullDevice
+        try? process.run()
+    }
+
+    /// Stops whatever is listening on the port (a dev server Pier, Projects or a terminal started).
+    static func stop(port: Int) {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
+        let out = Pipe()
+        lsof.standardOutput = out
+        lsof.standardError = FileHandle.nullDevice
+        guard (try? lsof.run()) != nil else { return }
+        lsof.waitUntilExit()
+        let pids = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").compactMap { pid_t($0) }
+        for pid in pids where pid != getpid() { kill(pid, SIGTERM) }
     }
 
     private static func isOpen(_ port: Int) -> Bool {
