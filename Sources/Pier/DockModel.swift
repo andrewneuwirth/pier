@@ -30,6 +30,8 @@ struct GroupsFile: Codable {
     var groups: [Group]
     /// Bundle ids (or paths) of always-running apps kept out of the bar.
     var hidden: [String]?
+    /// Icons picked in Pier (Change Icon…): app id → image file.
+    var icons: [String: String]?
 
     static let folder = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Pier")
@@ -82,6 +84,8 @@ final class DockModel {
     private(set) var bounces: [String: Int] = [:]
     /// "gtr-tone-app needs you", per app, for the hover card.
     private(set) var agentNotes: [String: [String]] = [:]
+    /// Bumped when an app's chosen icon changes, so its tile redraws.
+    private(set) var iconVersion = 0
     private(set) var memoryUsed: Double = 0      // bytes
     let memoryTotal = Double(ProcessInfo.processInfo.physicalMemory)
     private(set) var thermal = ProcessInfo.processInfo.thermalState
@@ -111,6 +115,11 @@ final class DockModel {
             observers.append(ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 MainActor.assumeIsolated {
+                    // An app may have switched its Dock icon (ChatGPT's Dock icon setting) since we last looked.
+                    if let app, let url = app.bundleURL, let self {
+                        let item = AppItem(running: app, url: url)
+                        if IconCache.changed(item, override: self.file.icons?[item.id]) { self.iconVersion += 1 }
+                    }
                     if name == NSWorkspace.didActivateApplicationNotification, let id = app?.bundleIdentifier {
                         self?.lastUsed[id] = Date()
                         if self?.attention[id] == .good { self?.attention[id] = nil }   // you've seen it
@@ -224,6 +233,29 @@ final class DockModel {
     func unpin(_ item: AppItem) {
         unpinFromFile(item)
         file.save()
+    }
+
+    func icon(for item: AppItem) -> NSImage {
+        _ = iconVersion   // redraw when a chosen icon changes
+        return IconCache.appIcon(item, override: file.icons?[item.id])
+    }
+
+    func hasCustomIcon(_ item: AppItem) -> Bool { file.icons?[item.id] != nil }
+
+    func setIcon(_ image: URL?, for item: AppItem) {
+        var icons = file.icons ?? [:]
+        icons[item.id] = image?.path
+        file.icons = icons.isEmpty ? nil : icons
+        file.save()
+        iconVersion += 1
+    }
+
+    func chooseIcon(for item: AppItem) {
+        let panel = NSOpenPanel()
+        panel.message = "Choose an icon for \(item.name)"
+        panel.allowedContentTypes = [.image]
+        NSApp.activate()   // Pier has no windows of its own; the panel needs it frontmost
+        if panel.runModal() == .OK, let url = panel.url { setIcon(url, for: item) }
     }
 
     func hide(_ item: AppItem) {

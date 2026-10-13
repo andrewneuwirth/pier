@@ -6,11 +6,42 @@ import MacToolsKit
 @MainActor
 enum IconCache {
     private static var icons: [String: NSImage] = [:]
+    private static var apps: [String: (source: String, image: NSImage)] = [:]
+
     static func icon(_ path: String) -> NSImage {
         if let icon = icons[path] { return icon }
         let icon = NSWorkspace.shared.icon(forFile: path)
         icons[path] = icon
         return icon
+    }
+
+    /// The icon an app shows in the Dock, which can differ from its file's: one you picked in Pier
+    /// (Change Icon…), else one the app records choosing (ChatGPT saves DockIconResourceName, an
+    /// image in its bundle). Apps that only swap the icon in memory can't be read from outside.
+    static func appIcon(_ item: AppItem, override: String?) -> NSImage {
+        let source = source(item, override: override)
+        if let cached = apps[item.url.path], cached.source == source { return cached.image }
+        let image = source.isEmpty ? nil : NSImage(contentsOfFile: source)
+        let result = image ?? icon(item.url.path)
+        apps[item.url.path] = (source, result)
+        return result
+    }
+
+    /// True when the app's chosen icon changed since it was last drawn.
+    static func changed(_ item: AppItem, override: String?) -> Bool {
+        guard let cached = apps[item.url.path] else { return false }
+        return cached.source != source(item, override: override)
+    }
+
+    private static func source(_ item: AppItem, override: String?) -> String {
+        if let override, FileManager.default.fileExists(atPath: override) { return override }
+        if let id = item.bundleID,
+           let name = CFPreferencesCopyAppValue("DockIconResourceName" as CFString, id as CFString) as? String,
+           !name.contains("/") {
+            let path = item.url.appendingPathComponent("Contents/Resources/\(name)").path
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return ""
     }
 }
 
@@ -107,7 +138,7 @@ private struct AppTile: View {
         let model = controller.model
         let reorder = controller.reorder
         Tile(running: model.isRunning(item), attention: model.attention[item.id], bounce: model.bounces[item.id] ?? 0) {
-            Image(nsImage: IconCache.icon(item.url.path)).resizable().interpolation(.high)
+            Image(nsImage: model.icon(for: item)).resizable().interpolation(.high)
         }
         .overlay(alignment: .topTrailing) {
             if let badge = model.badges[item.id] { Badge(text: badge) }
@@ -166,6 +197,9 @@ private struct AppMenu: View {
             }
             Divider()
         }
+        Button("Change Icon…") { model.chooseIcon(for: item) }
+        if model.hasCustomIcon(item) { Button("Use Original Icon") { model.setIcon(nil, for: item) } }
+        Divider()
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
         if model.isRunning(item) {
             Divider()
@@ -599,7 +633,7 @@ private struct OpenAppCell: View {
 
     var body: some View {
         VStack(spacing: MT.Space.s4) {
-            Image(nsImage: IconCache.icon(item.url.path)).resizable().frame(width: 44, height: 44)
+            Image(nsImage: model.icon(for: item)).resizable().frame(width: 44, height: 44)
                 .overlay(alignment: .topTrailing) {
                     if let badge = model.badges[item.id] { Badge(text: badge) }
                 }
