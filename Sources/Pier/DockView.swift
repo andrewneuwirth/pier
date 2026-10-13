@@ -849,27 +849,40 @@ struct LinksList: View {
         }
     }
 
+    private static let rowHeight: CGFloat = 30
+    @State private var dragging: UUID?
+    @State private var dragOffset: CGFloat = 0
+
     private var editor: some View {
         VStack(alignment: .leading, spacing: MT.Space.s8) {
-            List {
-                ForEach($draft) { $row in
-                    HStack(spacing: MT.Space.s6) {
-                        Image(systemName: "line.3.horizontal").foregroundStyle(Color.mtInkMuted).help("Drag to reorder")
-                        TextField("Name", text: $row.title).frame(width: 110).focused($focused, equals: row.id)
-                        TextField("Address", text: $row.url)
-                        Button { draft.removeAll { $0.id == row.id } } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(Color.mtBad)
+            // Plain rows, not a List: a List's reordering is system drag-and-drop, which never lands in
+            // Pier's panels, and it swallows clicks meant for the text fields.
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach($draft) { $row in
+                        HStack(spacing: MT.Space.s6) {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(Color.mtInkMuted)
+                                .frame(width: 18, height: Self.rowHeight).contentShape(.rect)
+                                .gesture(DragGesture(minimumDistance: 2)
+                                    .onChanged { dragging = row.id; dragOffset = $0.translation.height }
+                                    .onEnded { moveDragged(by: $0.translation.height) })
+                                .help("Drag to reorder")
+                            TextField("Name", text: $row.title).frame(width: 110).focused($focused, equals: row.id)
+                            TextField("Address", text: $row.url)
+                            Button { draft.removeAll { $0.id == row.id } } label: {
+                                Image(systemName: "minus.circle.fill").foregroundStyle(Color.mtBad)
+                            }
+                            .buttonStyle(.plain).help("Delete").accessibilityLabel("Delete \(row.title)")
                         }
-                        .buttonStyle(.plain).help("Delete").accessibilityLabel("Delete \(row.title)")
+                        .textFieldStyle(.roundedBorder).controlSize(.small)
+                        .frame(height: Self.rowHeight)
+                        .offset(y: dragging == row.id ? dragOffset : 0)
+                        .zIndex(dragging == row.id ? 1 : 0)
                     }
-                    .textFieldStyle(.roundedBorder).controlSize(.small)
-                    .listRowBackground(Color.clear)
                 }
-                .onMove { draft.move(fromOffsets: $0, toOffset: $1) }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .frame(height: min(CGFloat(max(draft.count, 1)) * 30 + 8, 340))
+            .scrollIndicators(.never)
+            .frame(height: min(CGFloat(max(draft.count, 1)) * Self.rowHeight, 330))
             Button {
                 let row = Draft(title: "", url: "")
                 draft.append(row)
@@ -878,6 +891,16 @@ struct LinksList: View {
             .buttonStyle(.glass).controlSize(.small)
             Text("Leave off https:// if you like; it's added for you.").font(.system(size: 10)).foregroundStyle(Color.mtInkMuted)
         }
+        // Typing needs Pier to be the active app; it has no windows of its own, so nothing else changes.
+        .onAppear { NSApp.activate() }
+    }
+
+    private func moveDragged(by height: CGFloat) {
+        defer { dragging = nil; dragOffset = 0 }
+        guard let id = dragging, let from = draft.firstIndex(where: { $0.id == id }) else { return }
+        let to = min(max(from + Int((height / Self.rowHeight).rounded()), 0), draft.count - 1)
+        guard to != from else { return }
+        draft.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
     }
 
     private func save() {
