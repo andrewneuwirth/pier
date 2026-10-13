@@ -48,9 +48,11 @@ final class Popup {
 
     func show(_ view: some View, above anchor: NSRect) {
         self.anchor = anchor
+        // A fresh identity per show: the hosting view is reused, and without this SwiftUI keeps the
+        // previous card's @State (and skips its .task), so every card showed the first app's memory.
         hosting.rootView = AnyView(view.fixedSize().onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
             self?.place(size)
-        })
+        }.id(UUID()))
         place(hosting.fittingSize)
         panel.orderFrontRegardless()
         if interactive && monitors.isEmpty {
