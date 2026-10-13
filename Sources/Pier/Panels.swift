@@ -104,6 +104,18 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
         var drop: ([URL], CGPoint) -> Bool
     }
     var dropRouter: DropRouter?
+    /// Right-click at a point (SwiftUI global coordinates): true when the owner showed its own menu.
+    var rightClick: ((CGPoint) -> Bool)?
+
+    /// AppKit asks the view for its context menu on every right-click, even in a panel that never
+    /// takes focus (an event monitor there missed them). The owner gets first say; otherwise
+    /// SwiftUI's .contextMenu as usual.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let p = convert(event.locationInWindow, from: nil)
+        let point = CGPoint(x: p.x, y: isFlipped ? p.y : bounds.height - p.y)
+        if let rightClick, rightClick(point) { return nil }
+        return super.menu(for: event)
+    }
 
     func acceptDrops() { registerForDraggedTypes([.fileURL, .URL]) }
 

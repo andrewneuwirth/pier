@@ -28,7 +28,6 @@ final class DockController {
     private var hoverTask: Task<Void, Never>?
     /// After a right-click, no hover card for that tile until the pointer leaves it.
     private var suppressedID: String?
-    private var rightClickMonitor: Any?
     private let menuTarget = MenuTarget()
 
     init() {
@@ -41,15 +40,11 @@ final class DockController {
         hosting.dropRouter = barDrops()
         fit(hosting.fittingSize)
         panel.orderFrontRegardless()
-        // Right-clicking an app: its own Dock menu items plus Pier's, instead of SwiftUI's static menu.
-        rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
-            MainActor.assumeIsolated {
-                guard let self, event.window === self.panel, let view = self.panel.contentView else { return event }
-                let point = CGPoint(x: event.locationInWindow.x, y: view.bounds.height - event.locationInWindow.y)
-                guard let item = self.item(at: point) else { return event }   // empty bar: Pier's own menu
-                self.showMenu(for: item)
-                return nil
-            }
+        // Right-clicking an app: its own Dock menu items plus Pier's. Elsewhere on the bar, Pier's menu.
+        hosting.rightClick = { [weak self] point in
+            guard let self, let item = self.item(at: point) else { return false }
+            self.showMenu(for: item)
+            return true
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -167,11 +162,17 @@ final class DockController {
         closeCard()
         let location = NSEvent.mouseLocation
         Task {
-            let entries = await DockMenus.read(item)
             let menu = NSMenu()
             menu.autoenablesItems = false
-            add(entries, path: [], to: menu, of: item)
-            if !entries.isEmpty { menu.addItem(.separator()) }
+            // Windows first, read directly; then the app's actions (from the Dock, remembered); then Pier's.
+            let windows = model.running[item.id].map { app in DockMenus.windows(of: app).map { ($0, app) } } ?? []
+            for (window, app) in windows {
+                menu.addItem(menuTarget.item(window.title) { DockMenus.raise(window.element, of: app) })
+            }
+            if !windows.isEmpty { menu.addItem(.separator()) }
+            let actions = await DockMenus.actions(item, windowTitles: Set(windows.map(\.0.title)))
+            add(actions, path: [], to: menu, of: item)
+            if !actions.isEmpty { menu.addItem(.separator()) }
             addPierItems(for: item, to: menu)
             menu.popUp(positioning: nil, at: location, in: nil)
         }

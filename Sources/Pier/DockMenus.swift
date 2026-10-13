@@ -17,11 +17,39 @@ enum DockMenus {
                                                  "Show Recents", "Open", "Show in Finder", "Keep in Dock", "Remove from Dock",
                                                  "Open at Login", "Assign To", "Unhide"]
 
-    /// Reads the app's items: opens the tile's Dock menu, copies it, closes it (≈0.2 s).
-    static func read(_ item: AppItem) async -> [Entry] {
-        await Task.detached(priority: .userInitiated) {
-            withMenu(of: item) { menu in tidy(entries(of: menu)) } ?? []
+    /// The app's actions (New Window, New Window with Profile ▸ …), without its window list. Reading
+    /// them opens the Dock's own menu for an instant, so it happens once per app and is remembered.
+    @MainActor private static var cache: [String: [Entry]] = [:]
+
+    @MainActor
+    static func actions(_ item: AppItem, windowTitles: Set<String>) async -> [Entry] {
+        if let cached = cache[item.url.path] { return cached }
+        let read = await Task.detached(priority: .userInitiated) {
+            withMenu(of: item) { menu in entries(of: menu) } ?? []
         }.value
+        // The window list changes all the time and Pier reads it directly, so keep only the actions.
+        let actions = tidy(read.filter { !windowTitles.contains($0.title) })
+        if !read.isEmpty { cache[item.url.path] = actions }
+        return actions
+    }
+
+    /// The app's open windows, straight from Accessibility (no Dock menu involved).
+    static func windows(of app: NSRunningApplication) -> [(title: String, element: AXUIElement)] {
+        guard AXIsProcessTrusted() else { return [] }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        return children(of: element, attribute: kAXWindowsAttribute).compactMap { window in
+            guard let title = string(window, kAXTitleAttribute), !title.isEmpty,
+                  string(window, kAXSubroleAttribute) == kAXStandardWindowSubrole as String else { return nil }
+            return (title, window)
+        }
+    }
+
+    static func raise(_ window: AXUIElement, of app: NSRunningApplication) {
+        app.activate()
+        if (attribute(window, kAXMinimizedAttribute) as? Bool) == true {
+            AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     }
 
     /// Presses the item at `path` (titles from the top level down) in the app's Dock menu.
@@ -53,7 +81,7 @@ enum DockMenus {
         guard AXIsProcessTrusted(),
               let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
         let app = AXUIElementCreateApplication(dock.processIdentifier)
-        let tiles = children(of: app).flatMap(children(of:))
+        let tiles = children(of: app).flatMap { children(of: $0) }
         let path = item.url.standardizedFileURL.path
         guard let tile = tiles.first(where: { ($0.url)?.standardizedFileURL.path == path })
                 ?? tiles.first(where: { string($0, kAXTitleAttribute) == item.name }) else { return nil }
@@ -106,8 +134,8 @@ enum DockMenus {
 
     private static func string(_ element: AXUIElement, _ name: String) -> String? { attribute(element, name) as? String }
 
-    private static func children(of element: AXUIElement) -> [AXUIElement] {
-        attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+    private static func children(of element: AXUIElement, attribute name: String = kAXChildrenAttribute) -> [AXUIElement] {
+        attribute(element, name) as? [AXUIElement] ?? []
     }
 }
 
