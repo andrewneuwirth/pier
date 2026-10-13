@@ -25,13 +25,16 @@ final class Popup {
         override var canBecomeKey: Bool { true }
     }
 
-    private let panel = Panel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+    // An ordinary (activating) window: a click inside gives Pier the keyboard for real, which code can't.
+    private let panel = Panel(contentRect: .zero, styleMask: [.borderless],
                               backing: .buffered, defer: false)
     private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
     private let interactive: Bool
     private var anchor: NSRect = .zero
     private var monitors: [Any] = []
     private(set) var closedAt = Date.distantPast
+    /// The app you were in when an interactive popup opened; focus goes back to it on close.
+    var previous: NSRunningApplication?
     var isVisible: Bool { panel.isVisible }
 
     init(interactive: Bool) {
@@ -58,15 +61,23 @@ final class Popup {
         place(hosting.fittingSize)
         panel.orderFrontRegardless()
         if interactive && monitors.isEmpty {
-            panel.makeKey()
+            // Remember the app you were in: clicking into the popup (a text field) really activates Pier,
+            // since this is an ordinary window, so focus goes back there when it closes.
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid() {
+                previous = NSWorkspace.shared.frontmostApplication
+            }
             monitors = [
                 NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                     MainActor.assumeIsolated { self?.close() }
                 } as Any,
+                // By position, not event.window: the click that activates Pier can arrive without one.
                 NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-                    MainActor.assumeIsolated { if event.window !== self?.panel { self?.close() } }
+                    MainActor.assumeIsolated {
+                        if let self, !self.panel.frame.contains(NSEvent.mouseLocation) { self.close() }
+                    }
                     return event
                 } as Any,
+                // Esc once Pier has the keyboard, i.e. after a click inside the popup.
                 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     guard event.keyCode == 53 else { return event }   // Escape
                     MainActor.assumeIsolated { self?.close() }
@@ -82,6 +93,8 @@ final class Popup {
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
         closedAt = Date()
+        if let previous, NSApp.isActive { previous.activate() }
+        previous = nil
     }
 
     private func place(_ size: CGSize) {
@@ -104,8 +117,8 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
         var drop: ([URL], CGPoint) -> Bool
     }
     var dropRouter: DropRouter?
-    /// Right-click at a point (SwiftUI global coordinates): true when the owner showed its own menu.
-    var rightClick: ((CGPoint) -> Bool)?
+    /// Right-click at a point (SwiftUI global coordinates): the owner's menu for it, or nil for SwiftUI's.
+    var rightClick: ((CGPoint) -> NSMenu?)?
 
     /// AppKit asks the view for its context menu on every right-click, even in a panel that never
     /// takes focus (an event monitor there missed them). The owner gets first say; otherwise
@@ -113,8 +126,9 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = convert(event.locationInWindow, from: nil)
         let point = CGPoint(x: p.x, y: isFlipped ? p.y : bounds.height - p.y)
-        if let rightClick, rightClick(point) { return nil }
-        return super.menu(for: event)
+        // Returned, not popped up: AppKit then runs it as a real context menu, so Esc and outside
+        // clicks close it even though Pier is never the frontmost app.
+        return rightClick?(point) ?? super.menu(for: event)
     }
 
     func acceptDrops() { registerForDraggedTypes([.fileURL, .URL]) }

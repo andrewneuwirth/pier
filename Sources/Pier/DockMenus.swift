@@ -21,12 +21,12 @@ enum DockMenus {
     /// them opens the Dock's own menu for an instant, so it happens once per app and is remembered.
     @MainActor private static var cache: [String: [Entry]] = [:]
 
+    /// Synchronous: a context menu must be ready when AppKit asks. Only the first read per app waits
+    /// (≈0.2 s) on the Dock; after that it's the remembered copy.
     @MainActor
-    static func actions(_ item: AppItem, windowTitles: Set<String>) async -> [Entry] {
+    static func actions(_ item: AppItem, windowTitles: Set<String>) -> [Entry] {
         if let cached = cache[item.url.path] { return cached }
-        let read = await Task.detached(priority: .userInitiated) {
-            withMenu(of: item) { menu in entries(of: menu) } ?? []
-        }.value
+        let read = withMenu(of: item) { menu in entries(of: menu) } ?? []
         // The window list changes all the time and Pier reads it directly, so keep only the actions.
         let actions = tidy(read.filter { !windowTitles.contains($0.title) })
         if !read.isEmpty { cache[item.url.path] = actions }

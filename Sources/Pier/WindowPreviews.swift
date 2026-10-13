@@ -28,8 +28,11 @@ final class WindowPreviews {
                 $0.owningApplication?.processID == pid && $0.windowLayer == 0
                     && $0.frame.width > 80 && $0.frame.height > 60
             }
+            // An untitled window beside titled ones is a helper (Chrome keeps some): its capture is mostly
+            // empty, so leave it out unless the app has nothing else.
+            let titled = windows.filter { !($0.title ?? "").isEmpty }
             var shots: [WindowShot] = []
-            for window in windows.prefix(6) {
+            for window in (titled.isEmpty ? windows : titled).prefix(6) {
                 let config = SCStreamConfiguration()
                 let scale = 360 / max(window.frame.width, window.frame.height)   // 180pt card at 2x
                 config.width = Int(window.frame.width * scale)

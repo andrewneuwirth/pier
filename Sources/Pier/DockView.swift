@@ -444,7 +444,7 @@ struct HoverCard: View {
                     Button("Allow Screen Recording for window previews") { WindowPreviews.requestCapture() }
                         .buttonStyle(.glass).controlSize(.small)
                 case .shots(let shots):
-                    HStack(alignment: .top, spacing: MT.Space.s8) {
+                    HStack(alignment: .center, spacing: MT.Space.s8) {
                         ForEach(shots) { shot in
                             ShotView(shot: shot) {
                                 controller.closeCard()
@@ -536,9 +536,11 @@ private struct ShotView: View {
 
     var body: some View {
         VStack(spacing: MT.Space.s4) {
+            // One box size for every window, the picture centred in it, so a small window doesn't
+            // leave a stray thumbnail in a corner of the card.
             Image(nsImage: shot.image).resizable().scaledToFit()
-                .frame(maxWidth: 180, maxHeight: 120)
                 .clipShape(.rect(cornerRadius: MT.Radius.control))
+                .frame(width: 180, height: 120)
             Text(shot.title.isEmpty ? " " : shot.title)
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(Color.mtInkMuted)
                 .lineLimit(1).frame(maxWidth: 180)
@@ -918,8 +920,6 @@ struct LinksList: View {
             .buttonStyle(.glass).controlSize(.small)
             Text("Leave off https:// if you like; it's added for you.").font(.system(size: 10)).foregroundStyle(Color.mtInkMuted)
         }
-        // Typing needs Pier to be the active app; it has no windows of its own, so nothing else changes.
-        .onAppear { NSApp.activate() }
     }
 
     private func moveDragged(by height: CGFloat) {

@@ -29,6 +29,7 @@ final class DockController {
     /// After a right-click, no hover card for that tile until the pointer leaves it.
     private var suppressedID: String?
     private let menuTarget = MenuTarget()
+    private let escCloser = EscCloser()
 
     init() {
         hosting.sizingOptions = []
@@ -42,9 +43,8 @@ final class DockController {
         panel.orderFrontRegardless()
         // Right-clicking an app: its own Dock menu items plus Pier's. Elsewhere on the bar, Pier's menu.
         hosting.rightClick = { [weak self] point in
-            guard let self, let item = self.item(at: point) else { return false }
-            self.showMenu(for: item)
-            return true
+            guard let self, let item = self.item(at: point) else { return nil }
+            return self.menu(for: item)
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -157,25 +157,23 @@ final class DockController {
 
     // MARK: Right-click menu
 
-    private func showMenu(for item: AppItem) {
+    private func menu(for item: AppItem) -> NSMenu {
         suppressedID = item.id
         closeCard()
-        let location = NSEvent.mouseLocation
-        Task {
-            let menu = NSMenu()
-            menu.autoenablesItems = false
-            // Windows first, read directly; then the app's actions (from the Dock, remembered); then Pier's.
-            let windows = model.running[item.id].map { app in DockMenus.windows(of: app).map { ($0, app) } } ?? []
-            for (window, app) in windows {
-                menu.addItem(menuTarget.item(window.title) { DockMenus.raise(window.element, of: app) })
-            }
-            if !windows.isEmpty { menu.addItem(.separator()) }
-            let actions = await DockMenus.actions(item, windowTitles: Set(windows.map(\.0.title)))
-            add(actions, path: [], to: menu, of: item)
-            if !actions.isEmpty { menu.addItem(.separator()) }
-            addPierItems(for: item, to: menu)
-            menu.popUp(positioning: nil, at: location, in: nil)
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = escCloser
+        // Windows first, read directly; then the app's actions (from the Dock, remembered); then Pier's.
+        let windows = model.running[item.id].map { app in DockMenus.windows(of: app).map { ($0, app) } } ?? []
+        for (window, app) in windows {
+            menu.addItem(menuTarget.item(window.title) { DockMenus.raise(window.element, of: app) })
         }
+        if !windows.isEmpty { menu.addItem(.separator()) }
+        let actions = DockMenus.actions(item, windowTitles: Set(windows.map(\.0.title)))
+        add(actions, path: [], to: menu, of: item)
+        if !actions.isEmpty { menu.addItem(.separator()) }
+        addPierItems(for: item, to: menu)
+        return menu
     }
 
     private func add(_ entries: [DockMenus.Entry], path: [String], to menu: NSMenu, of item: AppItem) {
@@ -365,4 +363,25 @@ final class MenuTarget: NSObject {
     }
 
     @objc private func choose(_ sender: NSMenuItem) { (sender.representedObject as? Box)?.run() }
+}
+
+/// Pier is never the frontmost app, and a menu only hears the keyboard (Esc, arrows, Return) in the
+/// active app. Activate while the menu is open (the older call: the cooperative one is refused
+/// here), then give focus back to the app you were in unless the chosen item moved it elsewhere.
+@MainActor
+final class EscCloser: NSObject, NSMenuDelegate {
+    private var previous: NSRunningApplication?
+
+    func menuWillOpen(_ menu: NSMenu) {
+        previous = NSWorkspace.shared.frontmostApplication
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        let previous = previous
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
+               let previous, previous.processIdentifier != getpid() { previous.activate() }
+        }
+    }
 }
