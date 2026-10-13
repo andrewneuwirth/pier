@@ -3,7 +3,7 @@
 Two glass rings on the desktop: how much of your Claude and ChatGPT allowance
 is gone, and when it comes back.
 
-![icon](Resources/Icon.svg)
+![icon](Resources/Glyph.svg)
 
 ## Where the numbers come from
 
@@ -69,7 +69,7 @@ down entirely** while the display sleeps, refreshing the moment it wakes.
 ```sh
 ./build.sh              # build/UsageRings.app
 ./build.sh --install    # into /Applications, and launch
-./scripts/makeicon.sh   # re-render Resources/UsageRings.icns from Icon.svg
+./scripts/makeicon.sh   # re-render Resources/UsageRings.icns: Kit's family plate + Glyph.svg
 ```
 
 `UsageRings --dump` prints what the rings would draw, through the same fetch

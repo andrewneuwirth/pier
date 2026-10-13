@@ -5,6 +5,7 @@ A macOS 26 app plus WidgetKit widget showing how much of the Claude and ChatGPT 
 ## Stack
 
 - SwiftUI + WidgetKit, Liquid Glass. Built through **XcodeGen** (`project.yml`) and `xcodebuild`, not SwiftPM: the widget is an app extension SwiftPM can't build. There is no `Package.swift`.
+- Depends on `../Kit` (MacToolsKit, the Mac Tools design system in Swift) for the Claude/ChatGPT colours, the 50/80% usage thresholds, the ring track and Open at Login. Change those in Kit, not here.
 - Targets: `UsageRings` (app, `Sources/UsageRings` + `Shared`) and `UsageRingsWidget` (app extension, `Widget` + `Shared`). Bundle ids `com.example.UsageRings` and `.Widget`.
 - `UsageRings.xcodeproj/` is generated and gitignored; edit `project.yml`, never the project file.
 
@@ -13,7 +14,7 @@ A macOS 26 app plus WidgetKit widget showing how much of the Claude and ChatGPT 
 ```sh
 ./build.sh               # xcodegen generate + xcodebuild Release (unsigned), then codesign inside-out
 ./build.sh --install     # kill, replace /Applications/UsageRings.app, launch
-./scripts/makeicon.sh    # re-render Resources/UsageRings.icns from Resources/Icon.svg
+./scripts/makeicon.sh    # re-render Resources/UsageRings.icns: Kit's family plate + Resources/Glyph.svg
 /Applications/UsageRings.app/Contents/MacOS/UsageRings --dump   # print what the rings would draw
 ```
 

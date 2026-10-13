@@ -1,4 +1,5 @@
 import SwiftUI
+import MacToolsKit
 
 /// One rate-limit window as both services report it: how much of the allowance
 /// is spent, and when it comes back.
@@ -59,17 +60,9 @@ enum Service: String, CaseIterable, Identifiable {
     /// Brand tint, used while usage is comfortable. Severity takes over later.
     var tint: Color {
         switch self {
-        case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .chatgpt: Color(red: 0.06, green: 0.64, blue: 0.50)
+        case .claude: .mtClaude
+        case .chatgpt: .mtChatGPT
         }
     }
 }
 
-/// Green-ish brand tint under half, amber past half, red once it is nearly
-/// gone — the same thresholds the shell status line already uses, so the two
-/// readouts never disagree about whether a number is worth worrying about.
-func severityTint(_ percent: Double, base: Color) -> Color {
-    if percent >= 80 { return Color(red: 0.91, green: 0.34, blue: 0.33) }
-    if percent >= 50 { return Color(red: 0.95, green: 0.71, blue: 0.27) }
-    return base
-}

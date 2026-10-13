@@ -1,4 +1,5 @@
 import SwiftUI
+import MacToolsKit
 import WidgetKit
 
 // The Usage Rings as a real desktop / Notification Center widget. Readings
@@ -34,14 +35,8 @@ struct UsageProvider: TimelineProvider {
     }
 }
 
-private let claudeTint = Color(red: 0.85, green: 0.47, blue: 0.34)
-private let chatgptTint = Color(red: 0.06, green: 0.64, blue: 0.50)
-
-private func severity(_ percent: Double, base: Color) -> Color {
-    if percent >= 80 { return Color(red: 0.91, green: 0.34, blue: 0.33) }
-    if percent >= 50 { return Color(red: 0.95, green: 0.71, blue: 0.27) }
-    return base
-}
+private let claudeTint = Color.mtClaude
+private let chatgptTint = Color.mtChatGPT
 
 private func resetText(_ w: SharedWindow?, now: Date) -> String? {
     guard let d = w?.resetsAt, d > now else { return nil }
@@ -66,14 +61,14 @@ private struct WidgetRing: View {
             Circle().stroke(.primary.opacity(0.12), lineWidth: thick)
             if let p = primary {
                 Circle().trim(from: 0, to: min(1, max(0.005, p.percent / 100)))
-                    .stroke(severity(p.percent, base: tint), style: StrokeStyle(lineWidth: thick, lineCap: .round))
+                    .stroke(usageTint(p.percent, base: tint), style: StrokeStyle(lineWidth: thick, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .widgetAccentable()
             }
             if let s = secondary {
                 Circle().stroke(.primary.opacity(0.08), lineWidth: thin).padding(thick * 1.6)
                 Circle().trim(from: 0, to: min(1, max(0.005, s.percent / 100)))
-                    .stroke(severity(s.percent, base: tint).opacity(0.85), style: StrokeStyle(lineWidth: thin, lineCap: .round))
+                    .stroke(usageTint(s.percent, base: tint).opacity(0.85), style: StrokeStyle(lineWidth: thin, lineCap: .round))
                     .rotationEffect(.degrees(-90)).padding(thick * 1.6)
             }
             VStack(spacing: 0) {

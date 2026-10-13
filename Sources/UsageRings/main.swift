@@ -1,5 +1,5 @@
 import AppKit
-import ServiceManagement
+import MacToolsKit
 import SwiftUI
 
 private let panelSize = NSSize(
@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(front)
 
         let login = item("Open at Login", #selector(toggleOpenAtLogin))
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
 
         menu.addItem(.separator())
@@ -217,15 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleDesktopRings() { showDesktopRings.toggle() }
 
     @objc private func toggleOpenAtLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSSound.beep()
-        }
+        if !LoginItem.set(!LoginItem.isEnabled) { NSSound.beep() }
     }
 }
 

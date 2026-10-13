@@ -1,4 +1,5 @@
 import SwiftUI
+import MacToolsKit
 
 /// Ring geometry, shared so the detail card can centre itself over a ring
 /// without re-deriving the layout.
@@ -85,7 +86,7 @@ private struct Ring: View {
                             .font(.system(size: 9, weight: .semibold, design: .rounded))
                             .opacity(0.7)
                     }
-                    .foregroundStyle(severityTint(headline.percent, base: .primary))
+                    .foregroundStyle(usageTint(headline.percent, base: .primary))
                 } else {
                     Text(usage.failed ? "!" : "–")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -128,11 +129,11 @@ private struct Arc: View {
         let fraction = min(max(percent / 100, 0), 1)
         ZStack {
             Circle()
-                .strokeBorder(.white.opacity(0.14), lineWidth: width)
+                .strokeBorder(Color.mtRingTrack, lineWidth: width)
             Circle()
                 .inset(by: width / 2)
                 .trim(from: 0, to: fraction)
-                .stroke(severityTint(percent, base: tint),
+                .stroke(usageTint(percent, base: tint),
                         style: StrokeStyle(lineWidth: width, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }

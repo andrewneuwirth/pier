@@ -1,4 +1,5 @@
 import SwiftUI
+import MacToolsKit
 
 let detailCardWidth: CGFloat = 194
 
@@ -52,7 +53,7 @@ struct DetailCard: View {
                 if let window {
                     Text("\(Int(window.percent.rounded()))%")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(severityTint(window.percent, base: .primary))
+                        .foregroundStyle(usageTint(window.percent, base: .primary))
                 } else {
                     Text("not on this plan")
                         .font(.system(size: 9)).foregroundStyle(.tertiary)
@@ -61,9 +62,9 @@ struct DetailCard: View {
             if let window {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.14))
+                        Capsule().fill(Color.mtRingTrack)
                         Capsule()
-                            .fill(severityTint(window.percent, base: service.tint))
+                            .fill(usageTint(window.percent, base: service.tint))
                             .frame(width: max(3, proxy.size.width * min(window.percent / 100, 1)))
                     }
                 }
@@ -78,7 +79,7 @@ struct DetailCard: View {
     private var footer: some View {
         Text(footerText)
             .font(.system(size: 9))
-            .foregroundStyle(usage.stale ? severityTint(50, base: .secondary) : Color.secondary.opacity(0.7))
+            .foregroundStyle(usage.stale ? usageTint(50, base: .secondary) : Color.secondary.opacity(0.7))
             .fixedSize(horizontal: false, vertical: true)
     }
 

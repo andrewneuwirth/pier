@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The app icon's glyph: drawn by Kit's icon tool onto the family plate (scripts/makeicon.sh).
+     Two rings at different fills, linked the way the pair sits on the desktop. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Keeps a clean gap where the right ring crosses the left one. -->
+    <mask id="linkGap">
+      <rect x="0" y="0" width="1024" height="1024" fill="#FFFFFF"/>
+      <circle cx="616" cy="512" r="205" fill="#000000"/>
+    </mask>
+  </defs>
+  <!-- Claude, three-quarters around, interrupted where ChatGPT crosses it. -->
+  <g mask="url(#linkGap)">
+    <circle cx="408" cy="512" r="165" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="44"/>
+    <circle cx="408" cy="512" r="165" fill="none" stroke="#D97757" stroke-width="44" stroke-linecap="round"
+            stroke-dasharray="778 1037" transform="rotate(-90 408 512)"/>
+  </g>
+  <!-- ChatGPT, a shorter arc, laid over the gap. -->
+  <circle cx="616" cy="512" r="165" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="44"/>
+  <circle cx="616" cy="512" r="165" fill="none" stroke="#10A37F" stroke-width="44" stroke-linecap="round"
+          stroke-dasharray="415 1037" transform="rotate(-90 616 512)"/>
+</svg>
