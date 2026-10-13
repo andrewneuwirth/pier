@@ -626,6 +626,7 @@ struct DownloadsGrid: View {
                 .scrollIndicators(.never)
                 .frame(height: min(CGFloat(rows) * 118, 420))
             }
+            SendZone(close: close)
         }
         .padding(MT.Space.s12)
         .frame(width: CGFloat(Self.columns) * Self.cell + CGFloat(Self.columns - 1) * MT.Space.s8 + MT.Space.s12 * 2)
@@ -664,6 +665,15 @@ private struct DownloadCell: View {
         }
         .draggable(item.url)
         .contextMenu {
+            Menu("Send To") {
+                ForEach(QuickSend.Target.allCases) { target in
+                    Button(target.rawValue, systemImage: target.symbol) {
+                        close()
+                        QuickSend.send(item.url, to: target)
+                    }
+                }
+            }
+            Divider()
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
         }
         .help(item.name)
@@ -715,5 +725,55 @@ private struct OpenAppCell: View {
         .contextMenu { AppMenu(item: item, model: model) }
         .accessibilityLabel(item.name)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The bottom of the Downloads grid: drop a file here, then pick where it goes. Nothing is sent;
+/// the message or chat box is filled in and you press Send.
+private struct SendZone: View {
+    let close: () -> Void
+    @State private var file: URL?
+    @State private var targeted = false
+
+    var body: some View {
+        Group {
+            if let file {
+                HStack(spacing: MT.Space.s8) {
+                    Image(nsImage: IconCache.icon(file.path)).resizable().frame(width: 28, height: 28)
+                    Text(file.lastPathComponent).font(.system(size: 11, weight: .medium)).foregroundStyle(Color.mtInk)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: MT.Space.s4)
+                    Button { self.file = nil } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                        .buttonStyle(.plain).foregroundStyle(Color.mtInkMuted).help("Clear")
+                }
+                HStack(spacing: MT.Space.s6) {
+                    ForEach(QuickSend.Target.allCases) { target in
+                        Button {
+                            close()
+                            QuickSend.send(file, to: target)
+                        } label: {
+                            Label(target.rawValue, systemImage: target.symbol).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass).controlSize(.small)
+                    }
+                }
+            } else {
+                Label("Drag a file here to send it", systemImage: "tray.and.arrow.down")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(Color.mtInkMuted)
+                    .frame(maxWidth: .infinity, minHeight: 34)
+            }
+        }
+        .padding(MT.Space.s8)
+        .background(targeted ? Color.mtFillHover : Color.mtFillInset, in: .rect(cornerRadius: MT.Radius.row))
+        .overlay {
+            RoundedRectangle(cornerRadius: MT.Radius.row)
+                .strokeBorder(targeted ? Color.accentColor : Color.mtRingTrack, style: StrokeStyle(lineWidth: 1, dash: file == nil ? [4, 3] : []))
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let first = urls.first else { return false }
+            file = first
+            return true
+        } isTargeted: { targeted = $0 }
+        .animation(MT.Motion.allowed(MT.Motion.quick), value: file)
     }
 }

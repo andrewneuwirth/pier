@@ -32,6 +32,8 @@ struct GroupsFile: Codable {
     var hidden: [String]?
     /// Icons picked in Pier (Change Icon…): app id → image file.
     var icons: [String: String]?
+    /// Your own phone number or email, for Downloads › Text Myself. Kept here, not in the code.
+    var myNumber: String?
 
     static let folder = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Pier")
