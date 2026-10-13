@@ -1,0 +1,95 @@
+import AppKit
+import SwiftUI
+
+/// The bar itself: borderless, never takes focus, on every Space, at the Dock's own window level.
+/// It is left out of full-screen Spaces, the way the real Dock stays out of a full-screen game.
+final class DockPanel: NSPanel {
+    init() {
+        super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false   // the glass draws its own edge
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)))
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        hidesOnDeactivate = false
+        isMovable = false
+    }
+    override var canBecomeKey: Bool { false }
+}
+
+/// A GlassPanel from the design system: opens 6pt above its anchor, stays 8pt inside the screen,
+/// and (when `interactive`) closes on an outside click or Escape.
+@MainActor
+final class Popup {
+    private final class Panel: NSPanel {
+        override var canBecomeKey: Bool { true }
+    }
+
+    private let panel = Panel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                              backing: .buffered, defer: false)
+    private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
+    private let interactive: Bool
+    private var anchor: NSRect = .zero
+    private var monitors: [Any] = []
+    private(set) var closedAt = Date.distantPast
+    var isVisible: Bool { panel.isVisible }
+
+    init(interactive: Bool) {
+        self.interactive = interactive
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.hidesOnDeactivate = false
+        hosting.sizingOptions = []
+        panel.contentView = hosting
+    }
+
+    func show(_ view: some View, above anchor: NSRect) {
+        self.anchor = anchor
+        hosting.rootView = AnyView(view.fixedSize().onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
+            self?.place(size)
+        })
+        place(hosting.fittingSize)
+        panel.orderFrontRegardless()
+        if interactive && monitors.isEmpty {
+            panel.makeKey()
+            monitors = [
+                NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.close() }
+                } as Any,
+                NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                    MainActor.assumeIsolated { if event.window !== self?.panel { self?.close() } }
+                    return event
+                } as Any,
+                NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                    guard event.keyCode == 53 else { return event }   // Escape
+                    MainActor.assumeIsolated { self?.close() }
+                    return nil
+                } as Any,
+            ]
+        }
+    }
+
+    func close() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+        closedAt = Date()
+    }
+
+    private func place(_ size: CGSize) {
+        guard size.width > 0, let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) }) ?? NSScreen.main
+        else { return }
+        let x = min(max(anchor.midX - size.width / 2, screen.frame.minX + 8), screen.frame.maxX - 8 - size.width)
+        panel.setFrame(NSRect(x: x, y: anchor.maxY + 6, width: size.width, height: size.height), display: true)
+    }
+}
+
+/// Without this, the first click on a panel that isn't key only makes it key, and a preview
+/// or tile needs a second click to act.
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
