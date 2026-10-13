@@ -276,6 +276,22 @@ final class DockModel {
         file.save()
     }
 
+    /// The Links editor's Done: keeps rows with an address, adds https:// when it's missing.
+    func setLinks(_ edited: [GroupsFile.Link]) {
+        var seen = Set<String>()
+        let cleaned = edited.compactMap { link -> GroupsFile.Link? in
+            var address = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !address.isEmpty else { return nil }
+            if !address.contains("://") { address = "https://" + address }
+            guard seen.insert(address).inserted else { return nil }
+            let title = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return GroupsFile.Link(title: title.isEmpty ? (URL(string: address)?.host() ?? address) : title, url: address)
+        }
+        guard cleaned != links else { return }
+        file.links = cleaned
+        file.save()
+    }
+
     func removeLink(_ link: GroupsFile.Link) {
         file.links = links.filter { $0 != link }
         file.save()

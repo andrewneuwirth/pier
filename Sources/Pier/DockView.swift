@@ -799,39 +799,90 @@ struct LinksList: View {
     let model: DockModel
     let controller: DockController
     let close: () -> Void
+    @State private var editing = false
+    @State private var draft: [Draft] = []
+    @FocusState private var focused: UUID?
+
+    /// An editable row; its own id, since a half-typed address can be empty or repeat another.
+    struct Draft: Identifiable { let id = UUID(); var title: String; var url: String }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MT.Space.s6) {
             HStack {
                 Text("QUICK LINKS").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
                 Spacer()
-                Button("Edit Links…") {
-                    close()
-                    controller.editGroups()
-                }
-                .buttonStyle(.glass).controlSize(.small)
-            }
-            if model.links.isEmpty {
-                Text("Drag a link from your browser onto the Links tile to add it.")
-                    .font(.system(size: 12)).foregroundStyle(Color.mtInkMuted).fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(model.links) { link in
-                LinkRow(link: link) {
-                    close()
-                    if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
-                }
-                .contextMenu {
-                    Button("Copy Link") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(link.url, forType: .string)
+                if editing {
+                    Button("Done") { save() }.buttonStyle(.glassProminent).controlSize(.small)
+                } else {
+                    Button("Edit") {
+                        draft = model.links.map { Draft(title: $0.title, url: $0.url) }
+                        editing = true
                     }
-                    Button("Remove Link", role: .destructive) { model.removeLink(link) }
+                    .buttonStyle(.glass).controlSize(.small)
                 }
             }
+            if editing { editor } else { list }
         }
         .padding(MT.Space.s12)
-        .frame(width: 280)
+        .frame(width: editing ? 380 : 280)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
+        .onDisappear { if editing { save() } }   // closing the panel keeps the edits
+    }
+
+    @ViewBuilder private var list: some View {
+        if model.links.isEmpty {
+            Text("No links yet. Click Edit to add one, or drag a link from your browser onto the Links tile.")
+                .font(.system(size: 12)).foregroundStyle(Color.mtInkMuted).fixedSize(horizontal: false, vertical: true)
+        }
+        ForEach(model.links) { link in
+            LinkRow(link: link) {
+                close()
+                if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
+            }
+            .contextMenu {
+                Button("Copy Link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(link.url, forType: .string)
+                }
+                Button("Remove Link", role: .destructive) { model.removeLink(link) }
+            }
+        }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: MT.Space.s8) {
+            List {
+                ForEach($draft) { $row in
+                    HStack(spacing: MT.Space.s6) {
+                        Image(systemName: "line.3.horizontal").foregroundStyle(Color.mtInkMuted).help("Drag to reorder")
+                        TextField("Name", text: $row.title).frame(width: 110).focused($focused, equals: row.id)
+                        TextField("Address", text: $row.url)
+                        Button { draft.removeAll { $0.id == row.id } } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(Color.mtBad)
+                        }
+                        .buttonStyle(.plain).help("Delete").accessibilityLabel("Delete \(row.title)")
+                    }
+                    .textFieldStyle(.roundedBorder).controlSize(.small)
+                    .listRowBackground(Color.clear)
+                }
+                .onMove { draft.move(fromOffsets: $0, toOffset: $1) }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(height: min(CGFloat(max(draft.count, 1)) * 30 + 8, 340))
+            Button {
+                let row = Draft(title: "", url: "")
+                draft.append(row)
+                focused = row.id
+            } label: { Label("Add Link", systemImage: "plus") }
+            .buttonStyle(.glass).controlSize(.small)
+            Text("Leave off https:// if you like; it's added for you.").font(.system(size: 10)).foregroundStyle(Color.mtInkMuted)
+        }
+    }
+
+    private func save() {
+        model.setLinks(draft.map { GroupsFile.Link(title: $0.title, url: $0.url) })
+        editing = false
     }
 }
 
