@@ -26,6 +26,8 @@ final class TabGroups {
     @ObservationIgnored private var placedAt = Date.distantPast       // our own moves aren't yours
     @ObservationIgnored private var workspace: [NSObjectProtocol] = []
     @ObservationIgnored private var checker: Timer?
+    @ObservationIgnored private var pausedUntil = Date.distantPast
+    @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
 
     static let stripHeight: CGFloat = 30
 
@@ -44,6 +46,19 @@ final class TabGroups {
         restore()
         for g in groups.indices { if let frame = activeFrame(of: g) { line(up: g, at: frame) } }
         refresh()
+        // Asleep or locked, apps can stop listing their windows; don't read that as every window closing.
+        let pause: (TimeInterval) -> (Notification) -> Void = { [weak self] seconds in
+            { _ in MainActor.assumeIsolated { self?.pausedUntil = Date().addingTimeInterval(seconds) } }
+        }
+        let ws = NSWorkspace.shared.notificationCenter, dc = DistributedNotificationCenter.default()
+        sleepObservers = [
+            ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main, using: pause(.infinity)),
+            ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main, using: pause(.infinity)),
+            dc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main, using: pause(.infinity)),
+            ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: pause(10)),
+            ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main, using: pause(10)),
+            dc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main, using: pause(10)),
+        ]
         checker = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { if self?.groups.isEmpty == false { self?.validate() } }
         }
@@ -143,10 +158,18 @@ final class TabGroups {
     /// Every couple of seconds while there are groups: a window no longer among its app's windows has
     /// gone (Chrome hides closed windows for reuse instead of destroying them, so no close is reported).
     private func validate() {
+        guard Date() > pausedUntil else { return }   // asleep, locked, or just back: apps may not answer yet
         var changed = false
+        var windowsByApp: [pid_t: [AXUIElement]] = [:]
         for id in groups.flatMap(\.windows) {
             guard let element = elements[id] else { continue }
-            let alive = AXWin.windows(of: AXWin.pid(element)).contains { AXWin.id($0) == id }
+            let pid = AXWin.pid(element)
+            let windows = windowsByApp[pid] ?? AXWin.windows(of: pid)
+            windowsByApp[pid] = windows
+            // No windows at all usually means the app can't answer right now (the Mac asleep or locked,
+            // the app busy), not that every window closed: skip it rather than break the group.
+            guard !windows.isEmpty else { continue }
+            let alive = windows.contains { AXWin.id($0) == id }
             if !alive {
                 takeOut(id)
                 elements[id] = nil
