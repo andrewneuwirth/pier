@@ -1,5 +1,5 @@
 import AppKit
-import ServiceManagement
+import MacToolsKit
 import SwiftUI
 
 /// Two status items: the visible Tuck button, and an invisible divider to its
@@ -101,7 +101,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         show.target = self
         menu.addItem(show)
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        login.state = LoginItem.isEnabled ? .on : .off
         login.target = self
         menu.addItem(login)
         menu.addItem(.separator())
@@ -117,12 +117,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
-            else { try SMAppService.mainApp.register() }
-        } catch {
-            NSLog("Tuck: login item: \(error)")
-        }
+        LoginItem.set(!LoginItem.isEnabled)
     }
 
     // MARK: Panel
@@ -156,8 +151,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         let size = hosting.sizeThatFits(in: CGSize(width: 260, height: 2000))
         let screen = bw.screen ?? NSScreen.main
         var x = bw.frame.midX - size.width / 2
-        if let s = screen?.visibleFrame { x = min(max(x, s.minX + 8), s.maxX - size.width - 8) }
-        let y = bw.frame.minY - size.height - 6
+        if let s = screen?.visibleFrame { x = min(max(x, s.minX + MT.Space.s8), s.maxX - size.width - MT.Space.s8) }
+        let y = bw.frame.minY - size.height - MT.Space.s6
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 

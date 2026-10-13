@@ -19,3 +19,6 @@ Build and install: `./build.sh` (signs with the Apple Development identity so
 the Accessibility grant survives rebuilds).
 
 Icon: `Assets/AppIcon.svg` is the source; `Assets/AppIcon.icns` is rendered from it.
+
+Part of the Mac Tools family: colours, spacing, radii and Open at Login come from
+`../Kit` (MacToolsKit), so build it with Kit checked out beside it.

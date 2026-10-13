@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MacToolsKit
 
 final class TrayModel: ObservableObject {
     @Published var items: [BarItem] = []
@@ -20,7 +21,7 @@ struct TrayView: View {
                 Text(model.loading ? "Looking…" : "Nothing in the menu bar")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    .padding(14)
+                    .padding(MT.Space.s12)
             } else {
                 ScrollView {
                     VStack(spacing: 1) {
@@ -34,13 +35,13 @@ struct TrayView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(6)
+        .padding(MT.Space.s6)
         .frame(width: 260)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
     }
 
     private var permission: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MT.Space.s8) {
             Text("Tuck needs Accessibility access to see and open menu bar icons.")
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)
@@ -48,7 +49,7 @@ struct TrayView: View {
                 .buttonStyle(.glass)
                 .controlSize(.small)
         }
-        .padding(10)
+        .padding(MT.Space.s10)
     }
 }
 
@@ -59,7 +60,7 @@ private struct Row: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: MT.Space.s10) {
                 if let symbol = item.symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 13, weight: .medium))
@@ -75,17 +76,15 @@ private struct Row: View {
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if !item.hidden {
-                    Circle().fill(.secondary.opacity(0.5)).frame(width: 4, height: 4)
+                    Circle().fill(Color.mtInkMuted.opacity(0.5)).frame(width: 4, height: 4)
                         .help("Visible in the menu bar")
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, MT.Space.s10)
             .frame(height: 30)
             .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(hover ? Color.primary.opacity(0.1) : .clear)
-            )
+            .background(hover ? Color.mtFillHover : .clear, in: .rect(cornerRadius: MT.Radius.row))
+            .animation(MT.Motion.allowed(MT.Motion.quick), value: hover)
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
