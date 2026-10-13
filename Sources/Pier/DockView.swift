@@ -68,10 +68,15 @@ struct DockView: View {
             }
             GroupDivider()
             if let playing = controller.nowPlaying.item {
-                NowPlayingTile(item: playing, nowPlaying: controller.nowPlaying)
+                NowPlayingTile(item: playing, nowPlaying: controller.nowPlaying, controller: controller)
             }
             StatsCluster(model: model, controller: controller)
             GroupDivider()
+            if !controller.minimized.windows.isEmpty {
+                // Like the macOS Dock: minimized windows get their own section.
+                ForEach(controller.minimized.windows) { MinimizedTile(window: $0, minimized: controller.minimized) }
+                GroupDivider()
+            }
             LinksTile(controller: controller, kind: .quick)
             LinksTile(controller: controller, kind: .projects)
             DownloadsTile(controller: controller)
@@ -244,6 +249,8 @@ private struct OverflowTile: View {
 private struct NowPlayingTile: View {
     let item: NowPlaying.Item
     let nowPlaying: NowPlaying
+    let controller: DockController
+    @State private var frame: CGRect = .zero
 
     var body: some View {
         HStack(spacing: MT.Space.s8) {
@@ -271,8 +278,9 @@ private struct NowPlayingTile: View {
         .contentShape(.rect)
         .onTapGesture { nowPlaying.reveal() }
         .glassEffect(.regular.interactive(), in: .capsule)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .onHover { controller.nowPlayingHover($0, frame: frame) }
         .padding(.bottom, 7)
-        .help("\(item.title) · \(item.subtitle)\nClick to go there")
     }
 }
 
@@ -457,6 +465,15 @@ struct HoverCard: View {
                 }
             }
             Text(item.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.mtInk)
+            // An app with several windows: stack them into one place with tabs (or undo it).
+            if let app, controller.tabs.windowCount(app) > 1 {
+                let grouped = controller.tabs.isGrouped(app)
+                Button(grouped ? "Ungroup Tabs" : "Group into Tabs", systemImage: "rectangle.stack") {
+                    controller.closeCard()
+                    if grouped { controller.tabs.ungroup(app) } else { controller.tabs.groupAll(app) }
+                }
+                .buttonStyle(.glass).controlSize(.small)
+            }
             if app != nil, let memory {
                 Text("\(AppMemory.format(memory)) memory").font(.system(size: 11, weight: .medium)).monospacedDigit()
                     .foregroundStyle(Color.mtInkMuted)
@@ -1084,5 +1101,136 @@ enum LocalServers {
         return withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
         }
+    }
+}
+
+/// Hovering Now Playing: the artwork, where the song is, and glass controls.
+struct NowPlayingCard: View {
+    let nowPlaying: NowPlaying
+    let controller: DockController
+    @State private var details: NowPlaying.Details?
+    @State private var fetchedAt = Date()
+
+    var body: some View {
+        let item = nowPlaying.item
+        VStack(spacing: MT.Space.s12) {
+            HStack(spacing: MT.Space.s12) {
+                Group {
+                    if let art = details?.artwork {
+                        Image(nsImage: art).resizable().scaledToFill()
+                    } else {
+                        Image(nsImage: IconCache.icon(NSWorkspace.shared.urlForApplication(withBundleIdentifier: item?.bundleID ?? "")?.path ?? ""))
+                            .resizable().padding(MT.Space.s8)
+                    }
+                }
+                .frame(width: 64, height: 64)
+                .clipShape(.rect(cornerRadius: MT.Radius.control, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item?.title ?? "").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.mtInk)
+                    Text(item?.subtitle ?? "").font(.system(size: 12)).foregroundStyle(Color.mtInkMuted)
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let details, details.duration > 0 {
+                // Ticks along on its own while playing; read once when the card opens.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = item?.playing == true ? context.date.timeIntervalSince(fetchedAt) : 0
+                    let position = min(details.position + elapsed, details.duration)
+                    VStack(spacing: 4) {
+                        GeometryReader { geo in
+                            Capsule().fill(Color.mtRingTrack)
+                                .overlay(alignment: .leading) {
+                                    Capsule().fill(Color.mtInk.opacity(0.7)).frame(width: geo.size.width * position / details.duration)
+                                }
+                        }
+                        .frame(height: 4)
+                        HStack {
+                            Text(Self.time(position))
+                            Spacer()
+                            Text("-" + Self.time(details.duration - position))
+                        }
+                        .font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(Color.mtInkMuted)
+                    }
+                }
+            }
+            HStack(spacing: MT.Space.s18) {
+                control("backward.fill", size: 14, label: "Previous") { nowPlaying.previous(); reload() }
+                control(item?.playing == true ? "pause.fill" : "play.fill", size: 20, label: item?.playing == true ? "Pause" : "Play") {
+                    nowPlaying.playPause()
+                    reload()
+                }
+                control("forward.fill", size: 14, label: "Next") { nowPlaying.next(); reload() }
+            }
+            Button("Open \(item.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).first?.localizedName } ?? "Player")") {
+                controller.closeCard()
+                nowPlaying.reveal()
+            }
+            .buttonStyle(.glass).controlSize(.small)
+        }
+        .padding(MT.Space.s12)
+        .frame(width: 280)
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
+        .onHover { controller.cardHover($0) }
+        .task { await load() }
+    }
+
+    private func control(_ symbol: String, size: CGFloat, label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: size, weight: .semibold))
+                .frame(width: size * 2.4, height: size * 2.4)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.mtInk)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .accessibilityLabel(label)
+    }
+
+    private func load() async {
+        details = await nowPlaying.details()
+        fetchedAt = Date()
+    }
+
+    /// After a skip the song changed; read it again once the player has caught up.
+    private func reload() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            await load()
+        }
+    }
+
+    private static func time(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+/// A minimized window: its picture (or its app's icon), with the app icon in the corner. Click to restore.
+private struct MinimizedTile: View {
+    let window: MinimizedWindows.Window
+    let minimized: MinimizedWindows
+    @Environment(\.tileSize) private var size
+
+    var body: some View {
+        Tile {
+            Group {
+                if let picture = window.picture {
+                    Image(nsImage: picture).resizable().scaledToFit()
+                        .clipShape(.rect(cornerRadius: 4, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                } else {
+                    Image(nsImage: IconCache.icon(window.app.bundleURL?.path ?? "")).resizable().opacity(0.85)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Image(nsImage: IconCache.icon(window.app.bundleURL?.path ?? "")).resizable()
+                    .frame(width: size * 0.42, height: size * 0.42)
+                    .offset(x: 4, y: 4)
+            }
+        }
+        .onTapGesture { minimized.restore(window) }
+        .help(window.title.isEmpty ? (window.app.localizedName ?? "Window") : window.title)
+        .accessibilityLabel("Minimized: \(window.title)")
+        .accessibilityAddTraits(.isButton)
     }
 }

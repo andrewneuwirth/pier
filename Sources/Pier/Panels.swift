@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 
 /// The bar itself: borderless, never takes focus, on every Space, at the Dock's own window level.
@@ -61,11 +62,11 @@ final class Popup {
         place(hosting.fittingSize)
         panel.orderFrontRegardless()
         if interactive && monitors.isEmpty {
-            // Remember the app you were in: clicking into the popup (a text field) really activates Pier,
-            // since this is an ordinary window, so focus goes back there when it closes.
+            // Remember the app you were in; Pier takes the keyboard while the popup is open and gives it back.
             if NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid() {
                 previous = NSWorkspace.shared.frontmostApplication
             }
+            Pier.takeFront { [weak self] in self?.panel.makeKeyAndOrderFront(nil) }
             monitors = [
                 NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                     MainActor.assumeIsolated { self?.close() }
@@ -77,7 +78,7 @@ final class Popup {
                     }
                     return event
                 } as Any,
-                // Esc once Pier has the keyboard, i.e. after a click inside the popup.
+                // Esc: Pier holds the keyboard while the popup is open (takeFront below).
                 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     guard event.keyCode == 53 else { return event }   // Escape
                     MainActor.assumeIsolated { self?.close() }
@@ -162,5 +163,21 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
         let taken = dropRouter.drop(urls, point(sender))
         _ = dropRouter.over(nil)
         return taken
+    }
+}
+
+@MainActor
+enum Pier {
+    /// Makes Pier the frontmost app for real, so a popup gets the keyboard (Esc, typing) at once.
+    /// NSApp.activate is refused for a background app that never takes focus: it reports success
+    /// while keys keep going to the previous app. Setting AXFrontmost through Accessibility (which
+    /// Pier has) is honoured. It's asked off the main thread, which has to answer the request.
+    static func takeFront(then done: @escaping @MainActor () -> Void) {
+        DispatchQueue.global(qos: .userInteractive).async {
+            if AXIsProcessTrusted() {
+                AXUIElementSetAttributeValue(AXUIElementCreateApplication(getpid()), kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { done() } }
+        }
     }
 }

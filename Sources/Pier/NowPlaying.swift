@@ -190,22 +190,80 @@ final class NowPlaying {
         }
     }
 
+    /// The icon flips at once; for Music and Spotify their own answer then settles it (Music keeps its
+    /// audio running a while after a pause, so the sound alone can't say).
     func playPause() {
         guard let item else { return }
+        self.item?.playing.toggle()
         if case .music(let app) = item.source {
-            run("tell application \"\(app)\" to playpause")
+            control(app, "playpause")
         } else {
-            // Browsers answer the system play/pause key (Media Session), so no code runs in the page.
-            Self.pressMediaPlayPause()
+            // Browsers answer the system media keys (Media Session), so no code runs in the page.
+            Self.pressMediaKey(16)   // NX_KEYTYPE_PLAY
         }
     }
 
-    /// The keyboard's ⏯ key, as a system-defined event. Posting it needs Accessibility.
-    private static func pressMediaPlayPause() {
-        let play = 16   // NX_KEYTYPE_PLAY
+    func next() { skip("next track", key: 17) }          // NX_KEYTYPE_NEXT
+    func previous() { skip("previous track", key: 18) }  // NX_KEYTYPE_PREVIOUS
+
+    private func skip(_ command: String, key: Int) {
+        guard let item else { return }
+        if case .music(let app) = item.source { control(app, command) } else { Self.pressMediaKey(key) }
+    }
+
+    /// Runs a command in Music or Spotify, then reads back what it's doing now.
+    private func control(_ app: String, _ command: String) {
+        Task {
+            _ = await Self.osascript("tell application \"\(app)\" to \(command)")
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let out = await Self.osascript("""
+                tell application "\(app)" to return (player state as text) & linefeed & (name of current track) & linefeed & (artist of current track)
+                """) else { return }
+            let lines = out.components(separatedBy: "\n")
+            guard var current = item, case .music(let now) = current.source, now == app else { return }
+            current.playing = lines.first == "playing"
+            if lines.count >= 3 { current.title = lines[1]; current.subtitle = lines[2] }
+            if current != item { item = current }
+        }
+    }
+
+    /// Where the song is, how long it is, and its artwork, for the hover card. Music and Spotify only.
+    struct Details { var position: Double; var duration: Double; var artwork: NSImage? }
+
+    func details() async -> Details? {
+        guard let item, case .music(let app) = item.source else { return nil }
+        let spotify = app == "Spotify"
+        guard let out = await Self.osascript("""
+            tell application "\(app)" to return (player position as text) & linefeed & (duration of current track as text)
+            """) else { return nil }
+        let numbers = out.components(separatedBy: "\n").map { Double($0.replacingOccurrences(of: ",", with: ".")) ?? 0 }
+        guard numbers.count == 2 else { return nil }
+        var details = Details(position: numbers[0], duration: spotify ? numbers[1] / 1000 : numbers[1], artwork: nil)
+        if spotify {
+            if let link = await Self.osascript("tell application \"Spotify\" to return artwork url of current track"),
+               let url = URL(string: link), let (data, _) = try? await URLSession.shared.data(from: url) {
+                details.artwork = NSImage(data: data)
+            }
+        } else {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("pier-artwork")
+            try? FileManager.default.removeItem(at: file)
+            _ = await Self.osascript("""
+                tell application "Music" to set art to raw data of artwork 1 of current track
+                set f to open for access (POSIX file "\(file.path)") with write permission
+                set eof f to 0
+                write art to f
+                close access f
+                """)
+            details.artwork = NSImage(contentsOf: file)
+        }
+        return details
+    }
+
+    /// A keyboard media key (⏯ ⏭ ⏮), as a system-defined event. Posting it needs Accessibility.
+    private static func pressMediaKey(_ key: Int) {
         for down in [true, false] {
             let flags = NSEvent.ModifierFlags(rawValue: down ? 0xa00 : 0xb00)
-            let data1 = (play << 16) | ((down ? 0xa : 0xb) << 8)
+            let data1 = (key << 16) | ((down ? 0xa : 0xb) << 8)
             NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: flags, timestamp: 0,
                                windowNumber: 0, context: nil, subtype: 8, data1: data1, data2: -1)?
                 .cgEvent?.post(tap: .cghidEventTap)

@@ -8,6 +8,8 @@ final class DockController {
     let downloads = DownloadsModel()
     let nowPlaying = NowPlaying()
     let reorder = Reorder()
+    let tabs = TabGroups()
+    let minimized = MinimizedWindows()
     let sendBox = SendBox()
     var trashFrame: CGRect = .zero
     var linksFrame: CGRect = .zero
@@ -41,6 +43,8 @@ final class DockController {
         hosting.dropRouter = barDrops()
         fit(hosting.fittingSize)
         panel.orderFrontRegardless()
+        tabs.start()
+        minimized.start()
         // Right-clicking an app: its own Dock menu items plus Pier's. Elsewhere on the bar, Pier's menu.
         hosting.rightClick = { [weak self] point in
             guard let self, let item = self.item(at: point) else { return nil }
@@ -111,6 +115,24 @@ final class DockController {
         }
     }
 
+    /// Hovering Now Playing: artwork, progress and glass controls.
+    func nowPlayingHover(_ inside: Bool, frame: CGRect) {
+        hoverTask?.cancel()
+        let id = "nowPlaying"
+        if inside {
+            hoveredID = id
+            guard !downloadsPopup.isVisible else { return }
+            hoverTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled, let self, self.hoveredID == id else { return }
+                self.hoverPopup.show(NowPlayingCard(nowPlaying: self.nowPlaying, controller: self), above: self.screenRect(frame))
+            }
+        } else {
+            if hoveredID == id { hoveredID = nil }
+            scheduleCardClose()
+        }
+    }
+
     /// Hovering the MEM ring: which apps are using the memory.
     func memoryHover(_ inside: Bool, frame: CGRect) {
         hoverTask?.cancel()
@@ -163,34 +185,23 @@ final class DockController {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = escCloser
-        // Windows first, read directly; then the app's actions (from the Dock, remembered); then Pier's.
-        let windows = model.running[item.id].map { app in DockMenus.windows(of: app).map { ($0, app) } } ?? []
-        for (window, app) in windows {
-            menu.addItem(menuTarget.item(window.title) { DockMenus.raise(window.element, of: app) })
+        // Built at once from the app itself: its windows, New Window, tab grouping, then Pier's own items.
+        if let app = model.running[item.id] {
+            let windows = DockMenus.windows(of: app)
+            for window in windows {
+                menu.addItem(menuTarget.item(window.title) { DockMenus.raise(window.element, of: app) })
+            }
+            if !windows.isEmpty { menu.addItem(.separator()) }
+            menu.addItem(menuTarget.item("New Window") { DockMenus.newWindow(app) })
+            if tabs.isGrouped(app) {
+                menu.addItem(menuTarget.item("Ungroup Tabs") { [weak self] in self?.tabs.ungroup(app) })
+            } else if windows.count > 1 {
+                menu.addItem(menuTarget.item("Group Windows into Tabs") { [weak self] in self?.tabs.groupAll(app) })
+            }
+            menu.addItem(.separator())
         }
-        if !windows.isEmpty { menu.addItem(.separator()) }
-        let actions = DockMenus.actions(item, windowTitles: Set(windows.map(\.0.title)))
-        add(actions, path: [], to: menu, of: item)
-        if !actions.isEmpty { menu.addItem(.separator()) }
         addPierItems(for: item, to: menu)
         return menu
-    }
-
-    private func add(_ entries: [DockMenus.Entry], path: [String], to menu: NSMenu, of item: AppItem) {
-        for entry in entries {
-            if entry.title.isEmpty { menu.addItem(.separator()); continue }
-            let path = path + [entry.title]
-            if entry.children.isEmpty {
-                menu.addItem(menuTarget.item(entry.title, enabled: entry.enabled) { DockMenus.press(path, of: item) })
-            } else {
-                let parent = NSMenuItem(title: entry.title, action: nil, keyEquivalent: "")
-                let submenu = NSMenu()
-                submenu.autoenablesItems = false
-                add(entry.children, path: path, to: submenu, of: item)
-                parent.submenu = submenu
-                menu.addItem(parent)
-            }
-        }
     }
 
     /// The same items as AppMenu (which the overflow grid still uses).
@@ -365,23 +376,38 @@ final class MenuTarget: NSObject {
     @objc private func choose(_ sender: NSMenuItem) { (sender.representedObject as? Box)?.run() }
 }
 
-/// Pier is never the frontmost app, and a menu only hears the keyboard (Esc, arrows, Return) in the
-/// active app. Activate while the menu is open (the older call: the cooperative one is refused
-/// here), then give focus back to the app you were in unless the chosen item moved it elsewhere.
+/// Esc for Pier's menus. Pier stays in the background (making itself active while a menu was open made
+/// macOS close the menu a moment later), so it can't hear the keyboard the usual way. While a menu is
+/// open, a listen-only event tap watches for Esc and closes it; the key still reaches your app too.
 @MainActor
 final class EscCloser: NSObject, NSMenuDelegate {
-    private var previous: NSRunningApplication?
+    private var tap: CFMachPort?
+    private var source: CFRunLoopSource?
+    fileprivate weak var menu: NSMenu?
 
     func menuWillOpen(_ menu: NSMenu) {
-        previous = NSWorkspace.shared.frontmostApplication
-        NSApp.activate(ignoringOtherApps: true)
+        self.menu = menu
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        guard tap == nil, let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+                                                      eventsOfInterest: mask, callback: escTap,
+                                                      userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return }
+        self.tap = tap
+        source = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)   // common modes include menu tracking
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        let previous = previous
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
-               let previous, previous.processIdentifier != getpid() { previous.activate() }
-        }
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        tap = nil
+        source = nil
     }
+}
+
+private let escTap: CGEventTapCallBack = { _, type, event, me in
+    if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53, let me {   // Escape
+        let closer = Unmanaged<EscCloser>.fromOpaque(me).takeUnretainedValue()
+        MainActor.assumeIsolated { closer.menu?.cancelTracking() }
+    }
+    return Unmanaged.passUnretained(event)
 }

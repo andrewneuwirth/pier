@@ -13,7 +13,19 @@ MainActor.assumeIsolated {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dock: DockController?
 
+    /// Parked tab windows are off screen; put every one back before Pier goes.
+    func applicationWillTerminate(_ notification: Notification) {
+        dock?.tabs.unparkAll()
+    }
+
+    /// A plain kill (build.sh, Activity Monitor's Quit) quits properly too, so parked tabs come back.
+    private var termination: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        signal(SIGTERM, SIG_IGN)
+        termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termination?.setEventHandler { NSApp.terminate(nil) }
+        termination?.resume()
         SystemDock.hide()
         // A Dock replacement should start at login. Turn it on once; after that the toggle is the user's.
         if !UserDefaults.standard.bool(forKey: "loginItemDefaulted") {
