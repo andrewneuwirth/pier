@@ -72,7 +72,8 @@ struct DockView: View {
             }
             StatsCluster(model: model, controller: controller)
             GroupDivider()
-            LinksTile(controller: controller)
+            LinksTile(controller: controller, kind: .quick)
+            LinksTile(controller: controller, kind: .projects)
             DownloadsTile(controller: controller)
             TrashTile(controller: controller)
         }
@@ -769,33 +770,38 @@ private struct SendZone: View {
     }
 }
 
-/// Quick Links: a tile that opens the list. Drop a link from a browser on it to add one.
+/// A links tile: Quick Links, or Projects (your sites and servers). Drop a link from a browser on it
+/// to add one to that list.
 private struct LinksTile: View {
     let controller: DockController
+    let kind: DockModel.LinkKind
     @State private var frame: CGRect = .zero
     @Environment(\.tileSize) private var size
 
     var body: some View {
+        let quick = kind == .quick
         Tile {
-            Image(systemName: "link")
-                .font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(.white)
+            Image(systemName: quick ? "link" : "server.rack")
+                .font(.system(size: size * 0.40, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: size * 0.82, height: size * 0.82)
-                .background(LinearGradient(colors: [Color.accentColor.mix(with: .black, by: 0.15), Color.accentColor.mix(with: .black, by: 0.55)],
+                .background(LinearGradient(colors: [(quick ? Color.accentColor : Color.mtProjects).mix(with: .black, by: 0.15),
+                                                    (quick ? Color.accentColor : Color.mtProjects).mix(with: .black, by: 0.55)],
                                            startPoint: .top, endPoint: .bottom),
                             in: .rect(cornerRadius: size * 0.82 * 185 / 824, style: .continuous))
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
             frame = $0
-            controller.linksFrame = $0
+            if quick { controller.linksFrame = $0 } else { controller.projectLinksFrame = $0 }
         }
-        .onTapGesture { controller.toggleGrid(.links, from: frame) }
-        .help("Quick Links")
-        .accessibilityLabel("Quick Links")
+        .onTapGesture { controller.toggleGrid(quick ? .links : .projectLinks, from: frame) }
+        .help(quick ? "Quick Links" : "Projects")
+        .accessibilityLabel(quick ? "Quick Links" : "Projects")
         .accessibilityAddTraits(.isButton)
     }
 }
 
 struct LinksList: View {
+    let kind: DockModel.LinkKind
     let model: DockModel
     let controller: DockController
     let close: () -> Void
@@ -804,18 +810,19 @@ struct LinksList: View {
     @FocusState private var focused: UUID?
 
     /// An editable row; its own id, since a half-typed address can be empty or repeat another.
-    struct Draft: Identifiable { let id = UUID(); var title: String; var url: String }
+    struct Draft: Identifiable { let id = UUID(); var title: String; var url: String; var path: String? }
+    @State private var listening: Set<Int> = []   // local ports with a server answering
 
     var body: some View {
         VStack(alignment: .leading, spacing: MT.Space.s6) {
             HStack {
-                Text("QUICK LINKS").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
+                Text(kind == .quick ? "QUICK LINKS" : "PROJECTS").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
                 Spacer()
                 if editing {
                     Button("Done") { save() }.buttonStyle(.glassProminent).controlSize(.small)
                 } else {
                     Button("Edit") {
-                        draft = model.links.map { Draft(title: $0.title, url: $0.url) }
+                        draft = model.links(kind).map { Draft(title: $0.title, url: $0.url, path: $0.path) }
                         editing = true
                     }
                     .buttonStyle(.glass).controlSize(.small)
@@ -827,15 +834,16 @@ struct LinksList: View {
         .frame(width: editing ? 380 : 280)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
         .onDisappear { if editing { save() } }   // closing the panel keeps the edits
+        .task { listening = await LocalServers.listening(model.links(kind)) }
     }
 
     @ViewBuilder private var list: some View {
-        if model.links.isEmpty {
+        if model.links(kind).isEmpty {
             Text("No links yet. Click Edit to add one, or drag a link from your browser onto the Links tile.")
                 .font(.system(size: 12)).foregroundStyle(Color.mtInkMuted).fixedSize(horizontal: false, vertical: true)
         }
-        ForEach(model.links) { link in
-            LinkRow(link: link) {
+        ForEach(model.links(kind)) { link in
+            LinkRow(link: link, running: LocalServers.port(of: link).map { listening.contains($0) }) {
                 close()
                 if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
             }
@@ -844,7 +852,7 @@ struct LinksList: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(link.url, forType: .string)
                 }
-                Button("Remove Link", role: .destructive) { model.removeLink(link) }
+                Button("Remove Link", role: .destructive) { model.removeLink(link, from: kind) }
             }
         }
     }
@@ -904,30 +912,36 @@ struct LinksList: View {
     }
 
     private func save() {
-        model.setLinks(draft.map { GroupsFile.Link(title: $0.title, url: $0.url) })
+        model.setLinks(draft.map { GroupsFile.Link(title: $0.title, url: $0.url, path: $0.path) }, for: kind)
         editing = false
     }
 }
 
 private struct LinkRow: View {
     let link: GroupsFile.Link
+    /// nil for sites on the internet; true/false for a server on this Mac.
+    var running: Bool? = nil
     let open: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        let host = URL(string: link.url)?.host()?.replacingOccurrences(of: "www.", with: "") ?? link.url
+        let url = URL(string: link.url)
+        let host = url.map { u in
+            let name = u.host()?.replacingOccurrences(of: "www.", with: "") ?? link.url
+            return ["127.0.0.1", "localhost"].contains(name) ? "localhost:\(u.port ?? 80)" : name
+        } ?? link.url
         HStack(spacing: MT.Space.s10) {
-            // A letter badge drawn here, so no site's icon is fetched from the network.
-            Text(String(link.title.prefix(1)).uppercased())
-                .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white)
-                .frame(width: 26, height: 26)
-                .background(Color(hue: Double(host.unicodeScalars.reduce(0) { ($0 * 31 + Int($1.value)) % 360 }) / 360, saturation: 0.48, brightness: 0.78),
-                            in: .rect(cornerRadius: 7, style: .continuous))
+            ProjectBadge(path: link.path, title: link.title, host: host)
             VStack(alignment: .leading, spacing: 1) {
                 Text(link.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.mtInk).lineLimit(1)
                 Text(host).font(.system(size: 10)).foregroundStyle(Color.mtInkMuted).lineLimit(1)
             }
             Spacer(minLength: 0)
+            if let running {
+                Circle().fill(running ? Color.mtGood : Color.mtRingTrack).frame(width: 7, height: 7)
+                    .help(running ? "Running" : "Not running")
+                    .accessibilityLabel(running ? "Running" : "Not running")
+            }
         }
         .padding(.horizontal, MT.Space.s8)
         .frame(height: 40)
@@ -937,5 +951,66 @@ private struct LinkRow: View {
         .onTapGesture(perform: open)
         .accessibilityLabel(link.title)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A project's real icon (Kit's ProjectIcon, the same finder Projects uses), else a letter badge
+/// drawn here, so no site's icon is fetched from the network.
+private struct ProjectBadge: View {
+    let path: String?
+    let title: String
+    let host: String
+    @State private var icon: ProjectIcon.Found?
+    @MainActor private static var cache: [String: ProjectIcon.Found] = [:]
+
+    var body: some View {
+        Group {
+            if let icon {
+                Image(nsImage: icon.image).resizable().interpolation(.high).scaledToFit()
+                    .clipShape(.rect(cornerRadius: icon.isMacIcon ? 0 : 7, style: .continuous))
+            } else {
+                Text(String(title.prefix(1)).uppercased())
+                    .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Color(hue: Double(host.unicodeScalars.reduce(0) { ($0 * 31 + Int($1.value)) % 360 }) / 360,
+                                      saturation: 0.48, brightness: 0.78),
+                                in: .rect(cornerRadius: 7, style: .continuous))
+            }
+        }
+        .frame(width: 26, height: 26)
+        .task(id: path) {
+            guard let path else { return }
+            if let cached = Self.cache[path] { icon = cached; return }
+            let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Developer").appendingPathComponent(path)
+            let found = await Task.detached(priority: .utility) { ProjectIcon.find(root: root, app: nil) }.value
+            if let found { Self.cache[path] = found }
+            icon = found
+        }
+    }
+}
+
+/// Which local servers answer, checked once when a list opens (a refused connect returns at once).
+enum LocalServers {
+    static func port(of link: GroupsFile.Link) -> Int? {
+        guard let url = URL(string: link.url), ["127.0.0.1", "localhost"].contains(url.host() ?? "") else { return nil }
+        return url.port ?? 80
+    }
+
+    static func listening(_ links: [GroupsFile.Link]) async -> Set<Int> {
+        let ports = Set(links.compactMap(port(of:)))
+        return await Task.detached(priority: .userInitiated) { Set(ports.filter(isOpen)) }.value
+    }
+
+    private static func isOpen(_ port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
+        }
     }
 }

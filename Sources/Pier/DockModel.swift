@@ -36,9 +36,13 @@ struct GroupsFile: Codable {
     var myNumber: String?
     /// Quick Links, in order. (Perch's favorites were copied in when it was retired.)
     var links: [Link]?
+    /// The Projects list: sites and local servers of your own projects, with their real icons.
+    var projectLinks: [Link]?
     struct Link: Codable, Equatable, Identifiable {
         var title: String
         var url: String
+        /// The project folder, under ~/Developer, whose icon this link shows (Projects lists only).
+        var path: String?
         var id: String { url }
     }
 
@@ -81,6 +85,17 @@ final class DockModel {
     private(set) var groups: [[AppItem]] = []
     private(set) var groupNames: [String] = []
     private(set) var links: [GroupsFile.Link] = []
+    private(set) var projectLinks: [GroupsFile.Link] = []
+
+    /// Which list of links: the everyday Quick Links, or your projects' sites and servers.
+    enum LinkKind { case quick, projects }
+
+    func links(_ kind: LinkKind) -> [GroupsFile.Link] { kind == .quick ? links : projectLinks }
+
+    private func store(_ list: [GroupsFile.Link], _ kind: LinkKind) {
+        if kind == .quick { file.links = list } else { file.projectLinks = list }
+        file.save()
+    }
     private(set) var running: [String: NSRunningApplication] = [:]   // by AppItem.id
     /// Open, unpinned, not hidden: the 4 used most recently get tiles; the rest sit behind "+N".
     private(set) var recent: [AppItem] = []
@@ -166,6 +181,7 @@ final class DockModel {
     func reloadGroups() {
         file = GroupsFile.load()
         if links != file.links ?? [] { links = file.links ?? [] }
+        if projectLinks != file.projectLinks ?? [] { projectLinks = file.projectLinks ?? [] }
         let loaded = file.groups.map { ($0.name, $0.apps.compactMap(AppItem.init(path:))) }.filter { !$0.1.isEmpty }
         groups = loaded.map(\.1)
         groupNames = file.groups.map(\.name)
@@ -269,15 +285,15 @@ final class DockModel {
         if panel.runModal() == .OK, let url = panel.url { setIcon(url, for: item) }
     }
 
-    func addLink(_ url: URL) {
-        guard url.scheme == "http" || url.scheme == "https", !links.contains(where: { $0.url == url.absoluteString }) else { return }
+    func addLink(_ url: URL, to kind: LinkKind = .quick) {
+        let list = links(kind)
+        guard url.scheme == "http" || url.scheme == "https", !list.contains(where: { $0.url == url.absoluteString }) else { return }
         let title = url.host()?.replacingOccurrences(of: "www.", with: "") ?? url.absoluteString
-        file.links = links + [GroupsFile.Link(title: title, url: url.absoluteString)]
-        file.save()
+        store(list + [GroupsFile.Link(title: title, url: url.absoluteString)], kind)
     }
 
     /// The Links editor's Done: keeps rows with an address, adds https:// when it's missing.
-    func setLinks(_ edited: [GroupsFile.Link]) {
+    func setLinks(_ edited: [GroupsFile.Link], for kind: LinkKind = .quick) {
         var seen = Set<String>()
         let cleaned = edited.compactMap { link -> GroupsFile.Link? in
             var address = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -285,16 +301,14 @@ final class DockModel {
             if !address.contains("://") { address = "https://" + address }
             guard seen.insert(address).inserted else { return nil }
             let title = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return GroupsFile.Link(title: title.isEmpty ? (URL(string: address)?.host() ?? address) : title, url: address)
+            return GroupsFile.Link(title: title.isEmpty ? (URL(string: address)?.host() ?? address) : title, url: address, path: link.path)
         }
-        guard cleaned != links else { return }
-        file.links = cleaned
-        file.save()
+        guard cleaned != links(kind) else { return }
+        store(cleaned, kind)
     }
 
-    func removeLink(_ link: GroupsFile.Link) {
-        file.links = links.filter { $0 != link }
-        file.save()
+    func removeLink(_ link: GroupsFile.Link, from kind: LinkKind = .quick) {
+        store(links(kind).filter { $0 != link }, kind)
     }
 
     func hide(_ item: AppItem) {
