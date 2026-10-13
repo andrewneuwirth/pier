@@ -8,6 +8,8 @@ final class DockController {
     let downloads = DownloadsModel()
     let nowPlaying = NowPlaying()
     let reorder = Reorder()
+    let sendBox = SendBox()
+    var trashFrame: CGRect = .zero
     /// Where each app tile sits, for working out the drop spot during a drag.
     var tileFrames: [String: CGRect] = [:]
     private let panel = DockPanel()
@@ -29,6 +31,8 @@ final class DockController {
         hosting.rootView = AnyView(DockView(controller: self).fixedSize().padding(.top, 12)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] in self?.fit($0) })
         panel.contentView = hosting
+        hosting.acceptDrops()
+        hosting.dropRouter = barDrops()
         fit(hosting.fittingSize)
         panel.orderFrontRegardless()
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -136,6 +140,32 @@ final class DockController {
         hoverPopup.close()
     }
 
+    // MARK: Drops on the bar
+
+    /// Files dropped on an app open with it; an app dropped on the bar pins before that tile; anything
+    /// dropped on the Trash goes to the Trash.
+    private func barDrops() -> FirstClickHostingView<AnyView>.DropRouter {
+        .init(over: { [weak self] point in
+            guard let self, let point else { return false }
+            return self.trashFrame.contains(point) || self.item(at: point) != nil
+        }, drop: { [weak self] urls, point in
+            guard let self, !urls.isEmpty else { return false }
+            if self.trashFrame.contains(point) {
+                for url in urls { try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+                return true
+            }
+            guard let target = self.item(at: point) else { return false }
+            let apps = urls.filter { $0.pathExtension == "app" }
+            if apps.isEmpty { self.model.open(target, files: urls) } else { apps.forEach { self.model.place($0, relativeTo: target) } }
+            return true
+        })
+    }
+
+    private func item(at point: CGPoint) -> AppItem? {
+        guard let id = tileFrames.first(where: { $0.value.contains(point) })?.key else { return nil }
+        return (model.groups.flatMap { $0 } + model.recent + model.overflow + [model.finder]).first { $0.id == id }
+    }
+
     // MARK: Reorder
 
     func dragChanged(_ item: AppItem, _ drag: DragGesture.Value) {
@@ -182,7 +212,16 @@ final class DockController {
         switch kind {
         case .downloads:
             downloads.refresh()
-            downloadsPopup.show(DownloadsGrid(model: downloads, close: close), above: screenRect(frame))
+            let box = sendBox
+            downloadsPopup.show(DownloadsGrid(model: downloads, sendBox: box, close: close), above: screenRect(frame),
+                                drop: .init(over: { point in
+                                    box.targeted = point.map { box.frame.contains($0) } ?? false
+                                    return box.targeted
+                                }, drop: { urls, point in
+                                    guard box.frame.contains(point), let file = urls.first else { return false }
+                                    box.file = file
+                                    return true
+                                }))
         case .openApps:
             downloadsPopup.show(OpenAppsGrid(model: model, close: close), above: screenRect(frame))
         }
@@ -208,4 +247,12 @@ final class Reorder {
     var offset: CGSize = .zero
     var target: (id: String, after: Bool)?
     var removing = false
+}
+
+/// The Downloads send box: what was dropped, whether a drag is over it, and where it is.
+@MainActor @Observable
+final class SendBox {
+    var file: URL?
+    var targeted = false
+    var frame: CGRect = .zero
 }

@@ -44,10 +44,12 @@ final class Popup {
         panel.hidesOnDeactivate = false
         hosting.sizingOptions = []
         panel.contentView = hosting
+        hosting.acceptDrops()
     }
 
-    func show(_ view: some View, above anchor: NSRect) {
+    func show(_ view: some View, above anchor: NSRect, drop: FirstClickHostingView<AnyView>.DropRouter? = nil) {
         self.anchor = anchor
+        hosting.dropRouter = drop
         // A fresh identity per show: the hosting view is reused, and without this SwiftUI keeps the
         // previous card's @State (and skips its .task), so every card showed the first app's memory.
         hosting.rootView = AnyView(view.fixedSize().onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
@@ -94,4 +96,45 @@ final class Popup {
 /// or tile needs a second click to act.
 final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// SwiftUI's dropDestination never fired in these panels, so drops are taken here, in AppKit, and
+    /// handed to whoever owns the window, with the point in SwiftUI's global (top-left) coordinates.
+    struct DropRouter {
+        var over: (CGPoint?) -> Bool          // nil when the drag leaves; true when that spot takes a drop
+        var drop: ([URL], CGPoint) -> Bool
+    }
+    var dropRouter: DropRouter?
+
+    func acceptDrops() { registerForDraggedTypes([.fileURL, .URL]) }
+
+    private func point(_ info: NSDraggingInfo) -> CGPoint {
+        let p = convert(info.draggingLocation, from: nil)
+        return CGPoint(x: p.x, y: isFlipped ? p.y : bounds.height - p.y)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        NSLog("Pier: drag entered (router: \(dropRouter != nil))")
+        return draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let dropRouter else { return super.draggingUpdated(sender) }
+        return dropRouter.over(point(sender)) ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard let dropRouter else { return super.draggingExited(sender) }
+        _ = dropRouter.over(nil)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let dropRouter else { return super.performDragOperation(sender) }
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
+        NSLog("Pier: drop of \(urls.count) item(s)")
+        let taken = dropRouter.drop(urls, point(sender))
+        _ = dropRouter.over(nil)
+        return taken
+    }
 }

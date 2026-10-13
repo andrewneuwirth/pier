@@ -73,7 +73,7 @@ struct DockView: View {
             StatsCluster(model: model, controller: controller)
             GroupDivider()
             DownloadsTile(controller: controller)
-            TrashTile()
+            TrashTile(controller: controller)
         }
         .padding(MT.Space.s6)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
@@ -165,12 +165,6 @@ private struct AppTile: View {
                 Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 4)
                     .offset(x: reorder.target?.after == true ? 4 : -4)
             }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            // Files dragged in from Finder open with this app; an app dragged in from Finder pins here.
-            let apps = urls.filter { $0.pathExtension == "app" }
-            if apps.isEmpty { model.open(item, files: urls) } else { apps.forEach { model.place($0, relativeTo: item) } }
-            return true
         }
         .contextMenu { AppMenu(item: item, model: model) }
         .accessibilityLabel(model.badges[item.id].map { "\(item.name), \($0) unread" } ?? item.name)
@@ -297,17 +291,15 @@ private struct DownloadsTile: View {
 }
 
 private struct TrashTile: View {
+    let controller: DockController
     private static let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
 
     var body: some View {
         Tile {
             Image(nsImage: NSImage(named: NSImage.trashEmptyName) ?? NSImage()).resizable()
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { controller.trashFrame = $0 }
         .onTapGesture { NSWorkspace.shared.open(Self.trash) }
-        .dropDestination(for: URL.self) { urls, _ in
-            for url in urls { try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
-            return true
-        }
         .help("Trash")
         .accessibilityLabel("Trash")
         .accessibilityAddTraits(.isButton)
@@ -595,6 +587,7 @@ private struct ShotView: View {
 
 struct DownloadsGrid: View {
     let model: DownloadsModel
+    let sendBox: SendBox
     let close: () -> Void
     private static let cell: CGFloat = 84
     private static let columns = 4
@@ -626,7 +619,7 @@ struct DownloadsGrid: View {
                 .scrollIndicators(.never)
                 .frame(height: min(CGFloat(rows) * 118, 420))
             }
-            SendZone(close: close)
+            SendZone(box: sendBox, close: close)
         }
         .padding(MT.Space.s12)
         .frame(width: CGFloat(Self.columns) * Self.cell + CGFloat(Self.columns - 1) * MT.Space.s8 + MT.Space.s12 * 2)
@@ -731,9 +724,10 @@ private struct OpenAppCell: View {
 /// The bottom of the Downloads grid: drop a file here, then pick where it goes. Nothing is sent;
 /// the message or chat box is filled in and you press Send.
 private struct SendZone: View {
+    let box: SendBox
     let close: () -> Void
-    @State private var file: URL?
-    @State private var targeted = false
+    private var file: URL? { box.file }
+    private var targeted: Bool { box.targeted }
 
     var body: some View {
         Group {
@@ -743,7 +737,7 @@ private struct SendZone: View {
                     Text(file.lastPathComponent).font(.system(size: 11, weight: .medium)).foregroundStyle(Color.mtInk)
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: MT.Space.s4)
-                    Button { self.file = nil } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                    Button { box.file = nil } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
                         .buttonStyle(.plain).foregroundStyle(Color.mtInkMuted).help("Clear")
                 }
                 HStack(spacing: MT.Space.s6) {
@@ -769,11 +763,7 @@ private struct SendZone: View {
             RoundedRectangle(cornerRadius: MT.Radius.row)
                 .strokeBorder(targeted ? Color.accentColor : Color.mtRingTrack, style: StrokeStyle(lineWidth: 1, dash: file == nil ? [4, 3] : []))
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            guard let first = urls.first else { return false }
-            file = first
-            return true
-        } isTargeted: { targeted = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { box.frame = $0 }   // drops land in AppKit (FirstClickHostingView)
         .animation(MT.Motion.allowed(MT.Motion.quick), value: file)
     }
 }
