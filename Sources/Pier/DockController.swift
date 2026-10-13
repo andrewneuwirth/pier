@@ -26,6 +26,10 @@ final class DockController {
     private var hoveredID: String?
     private var cardHovered = false
     private var hoverTask: Task<Void, Never>?
+    /// After a right-click, no hover card for that tile until the pointer leaves it.
+    private var suppressedID: String?
+    private var rightClickMonitor: Any?
+    private let menuTarget = MenuTarget()
 
     init() {
         hosting.sizingOptions = []
@@ -37,6 +41,16 @@ final class DockController {
         hosting.dropRouter = barDrops()
         fit(hosting.fittingSize)
         panel.orderFrontRegardless()
+        // Right-clicking an app: its own Dock menu items plus Pier's, instead of SwiftUI's static menu.
+        rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, event.window === self.panel, let view = self.panel.contentView else { return event }
+                let point = CGPoint(x: event.locationInWindow.x, y: view.bounds.height - event.locationInWindow.y)
+                guard let item = self.item(at: point) else { return event }   // empty bar: Pier's own menu
+                self.showMenu(for: item)
+                return nil
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { if let self { self.fit(self.size) } }
@@ -82,6 +96,10 @@ final class DockController {
     // MARK: Hover card
 
     func hoverChanged(_ item: AppItem, inside: Bool, frame: CGRect) {
+        if suppressedID == item.id {
+            if !inside { suppressedID = nil }
+            return
+        }
         hoverTask?.cancel()
         if inside {
             hoveredID = item.id
@@ -140,6 +158,69 @@ final class DockController {
         hoverTask?.cancel()
         cardHovered = false
         hoverPopup.close()
+    }
+
+    // MARK: Right-click menu
+
+    private func showMenu(for item: AppItem) {
+        suppressedID = item.id
+        closeCard()
+        let location = NSEvent.mouseLocation
+        Task {
+            let entries = await DockMenus.read(item)
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            add(entries, path: [], to: menu, of: item)
+            if !entries.isEmpty { menu.addItem(.separator()) }
+            addPierItems(for: item, to: menu)
+            menu.popUp(positioning: nil, at: location, in: nil)
+        }
+    }
+
+    private func add(_ entries: [DockMenus.Entry], path: [String], to menu: NSMenu, of item: AppItem) {
+        for entry in entries {
+            if entry.title.isEmpty { menu.addItem(.separator()); continue }
+            let path = path + [entry.title]
+            if entry.children.isEmpty {
+                menu.addItem(menuTarget.item(entry.title, enabled: entry.enabled) { DockMenus.press(path, of: item) })
+            } else {
+                let parent = NSMenuItem(title: entry.title, action: nil, keyEquivalent: "")
+                let submenu = NSMenu()
+                submenu.autoenablesItems = false
+                add(entry.children, path: path, to: submenu, of: item)
+                parent.submenu = submenu
+                menu.addItem(parent)
+            }
+        }
+    }
+
+    /// The same items as AppMenu (which the overflow grid still uses).
+    private func addPierItems(for item: AppItem, to menu: NSMenu) {
+        if item != model.finder {
+            let keep = NSMenuItem(title: "Keep in Pier", action: nil, keyEquivalent: "")
+            let groups = NSMenu()
+            for (index, name) in model.groupNames.enumerated() {
+                groups.addItem(menuTarget.item(name) { [weak self] in self?.model.pin(item, toGroup: index) })
+            }
+            keep.submenu = groups
+            menu.addItem(keep)
+            if model.isPinned(item) {
+                menu.addItem(menuTarget.item("Remove from Pier") { [weak self] in self?.model.unpin(item) })
+            } else {
+                menu.addItem(menuTarget.item("Hide from Pier") { [weak self] in self?.model.hide(item) })
+            }
+            menu.addItem(.separator())
+        }
+        menu.addItem(menuTarget.item("Change Icon…") { [weak self] in self?.model.chooseIcon(for: item) })
+        if model.hasCustomIcon(item) {
+            menu.addItem(menuTarget.item("Use Original Icon") { [weak self] in self?.model.setIcon(nil, for: item) })
+        }
+        menu.addItem(.separator())
+        menu.addItem(menuTarget.item("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) })
+        if model.isRunning(item) {
+            menu.addItem(.separator())
+            menu.addItem(menuTarget.item("Quit") { [weak self] in self?.model.quit(item) })
+        }
     }
 
     // MARK: Drops on the bar
@@ -267,4 +348,20 @@ final class SendBox {
     var file: URL?
     var targeted = false
     var frame: CGRect = .zero
+}
+
+/// Runs a closure when an NSMenuItem is chosen.
+@MainActor
+final class MenuTarget: NSObject {
+    private final class Box: NSObject { let run: () -> Void; init(_ run: @escaping () -> Void) { self.run = run } }
+
+    func item(_ title: String, enabled: Bool = true, _ run: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(choose(_:)), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = enabled
+        item.representedObject = Box(run)
+        return item
+    }
+
+    @objc private func choose(_ sender: NSMenuItem) { (sender.representedObject as? Box)?.run() }
 }

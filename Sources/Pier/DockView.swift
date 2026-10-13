@@ -168,7 +168,7 @@ private struct AppTile: View {
                     .offset(x: reorder.target?.after == true ? 4 : -4)
             }
         }
-        .contextMenu { AppMenu(item: item, model: model) }
+        // Right-click is handled by DockController (the app's own Dock items plus Pier's).
         .accessibilityLabel(model.badges[item.id].map { "\(item.name), \($0) unread" } ?? item.name)
         .accessibilityAddTraits(.isButton)
     }
