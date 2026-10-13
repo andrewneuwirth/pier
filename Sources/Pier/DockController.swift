@@ -92,6 +92,24 @@ final class DockController {
         }
     }
 
+    /// Hovering the MEM ring: which apps are using the memory.
+    func memoryHover(_ inside: Bool, frame: CGRect) {
+        hoverTask?.cancel()
+        let id = "memory"
+        if inside {
+            hoveredID = id
+            guard !downloadsPopup.isVisible else { return }
+            hoverTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self, self.hoveredID == id else { return }
+                self.hoverPopup.show(MemoryCard(model: self.model, controller: self), above: self.screenRect(frame))
+            }
+        } else {
+            if hoveredID == id { hoveredID = nil }
+            scheduleCardClose()
+        }
+    }
+
     private func showCard(for item: AppItem, at anchor: NSRect) {
         let app = model.running[item.id]
         let previews = WindowPreviews()

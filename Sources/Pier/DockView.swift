@@ -70,7 +70,7 @@ struct DockView: View {
             if let playing = controller.nowPlaying.item {
                 NowPlayingTile(item: playing, nowPlaying: controller.nowPlaying)
             }
-            StatsCluster(model: model)
+            StatsCluster(model: model, controller: controller)
             GroupDivider()
             DownloadsTile(controller: controller)
             TrashTile()
@@ -318,6 +318,8 @@ private struct TrashTile: View {
 
 private struct StatsCluster: View {
     let model: DockModel
+    let controller: DockController
+    @State private var memFrame: CGRect = .zero
 
     var body: some View {
         let gb = 1_073_741_824.0
@@ -327,7 +329,10 @@ private struct StatsCluster: View {
                 usageRing("Claude", model.usage?.claude, tint: .mtClaude)
                 usageRing("ChatGPT", model.usage?.chatgpt, tint: .mtChatGPT)
                 MiniRing(percent: memPercent, secondary: nil, label: "MEM", base: .mtInk,
-                         detail: String(format: "Memory: %.1f of %.0f GB used", model.memoryUsed / gb, model.memoryTotal / gb))
+                         detail: String(format: "Memory: %.1f of %.0f GB used", model.memoryUsed / gb, model.memoryTotal / gb),
+                         tooltip: false)   // the hover card replaces the tooltip
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { memFrame = $0 }
+                    .onHover { controller.memoryHover($0, frame: memFrame) }
                     .onTapGesture {
                         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"),
                                                            configuration: .init())
@@ -360,6 +365,7 @@ private struct MiniRing: View {
     let label: String
     let base: Color
     let detail: String
+    var tooltip = true
 
     var body: some View {
         ZStack {
@@ -378,7 +384,7 @@ private struct MiniRing: View {
         .contentShape(.circle)
         .glassEffect(.regular.interactive(), in: .circle)
         .animation(MT.Motion.allowed(MT.Motion.value), value: percent)
-        .help(detail)
+        .help(tooltip ? detail : "")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(detail)
     }
@@ -430,6 +436,7 @@ struct HoverCard: View {
     let app: NSRunningApplication?
     let previews: WindowPreviews
     let controller: DockController
+    @State private var memory: UInt64?
 
     var body: some View {
         VStack(spacing: MT.Space.s8) {
@@ -456,6 +463,10 @@ struct HoverCard: View {
                 }
             }
             Text(item.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.mtInk)
+            if app != nil, let memory {
+                Text("\(AppMemory.format(memory)) memory").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(Color.mtInkMuted)
+            }
             ForEach(controller.model.agentNotes[item.id] ?? [], id: \.self) { note in
                 Label(note, systemImage: note.hasSuffix("needs you") ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 11, weight: .medium))
@@ -466,6 +477,59 @@ struct HoverCard: View {
         .padding(.vertical, MT.Space.s8)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.card))
         .onHover { controller.cardHover($0) }
+        .task { if app != nil { memory = await AppMemory.use(of: item.url.path) } }
+    }
+}
+
+/// Hovering MEM: the apps holding the most memory, each with its share as a bar.
+struct MemoryCard: View {
+    let model: DockModel
+    let controller: DockController
+    @State private var apps: [AppMemory.Use]?
+    private static let shown = 8
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MT.Space.s8) {
+            HStack {
+                Text("MEMORY").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
+                Spacer(minLength: MT.Space.s12)
+                Text("\(AppMemory.format(UInt64(model.memoryUsed))) of \(AppMemory.format(UInt64(model.memoryTotal)))")
+                    .font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(Color.mtInkMuted)
+            }
+            if let apps {
+                let top = Array(apps.prefix(Self.shown))
+                let largest = Double(top.first?.bytes ?? 1)
+                ForEach(top) { use in
+                    HStack(spacing: MT.Space.s8) {
+                        Image(nsImage: IconCache.icon(use.path)).resizable().frame(width: 20, height: 20)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(use.name).font(.system(size: 12, weight: .medium)).foregroundStyle(Color.mtInk).lineLimit(1)
+                                Spacer(minLength: MT.Space.s8)
+                                Text(AppMemory.format(use.bytes)).font(.system(size: 11, weight: .medium)).monospacedDigit()
+                                    .foregroundStyle(Color.mtInkMuted)
+                            }
+                            GeometryReader { geo in
+                                Capsule().fill(Color.mtRingTrack)
+                                    .overlay(alignment: .leading) {
+                                        Capsule().fill(Color.mtInk.opacity(0.55))
+                                            .frame(width: geo.size.width * Double(use.bytes) / largest)
+                                    }
+                            }
+                            .frame(height: 3)
+                        }
+                    }
+                }
+                Text("Click MEM for Activity Monitor").font(.system(size: 10)).foregroundStyle(Color.mtInkMuted)
+            } else {
+                Text("Measuring…").font(.system(size: 12)).foregroundStyle(Color.mtInkMuted)
+            }
+        }
+        .padding(MT.Space.s12)
+        .frame(width: 260)
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
+        .onHover { controller.cardHover($0) }
+        .task { apps = await AppMemory.snapshot() }
     }
 }
 
