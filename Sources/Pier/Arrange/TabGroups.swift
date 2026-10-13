@@ -233,11 +233,11 @@ final class TabGroups {
                 forgetClosed()
             }
         case kAXFocusedWindowChangedNotification:
-            // You brought a grouped window forward some other way (⌘`, a menu): it's the tab showing now.
-            guard let id = AXWin.id(element), let g = group(holding: id),
-                  groups[g].windows[groups[g].active] != id else { restack(); return }
-            groups[g].active = groups[g].windows.firstIndex(of: id) ?? 0
-            refresh()
+            // A parked tab got focus some other way (⌘`, a menu, or the app handing focus over when the
+            // showing window closed): swap it into the group's spot, as if its tab were clicked.
+            guard let id = AXWin.id(element), group(holding: id).map({ groups[$0].windows[groups[$0].active] != id }) == true
+            else { restack(); return }
+            select(id)
         case kAXWindowMiniaturizedNotification:
             guard let id = AXWin.id(element), let g = group(holding: id) else { return }
             minimized.insert(id)   // it stays in the strip, dimmed; the next tab comes forward
@@ -273,7 +273,7 @@ final class TabGroups {
         }
         for group in groups {
             guard let g = groups.firstIndex(where: { $0.id == group.id }), let frame = activeFrame(of: g) else { continue }
-            groups[g].frame = frame   // follows your moves of the window showing
+            if !isParked(frame) { groups[g].frame = frame }   // follows your moves of the window showing
             let tabs = group.windows.compactMap { id -> TabStripPanel.Tab? in
                 guard let element = elements[id] else { return nil }
                 return .init(id: id, title: AXWin.title(element),
@@ -314,8 +314,16 @@ final class TabGroups {
     /// Where the group shows: the window showing, else the spot remembered (never a parked window's).
     private func activeFrame(of g: Int) -> CGRect? {
         let id = groups[g].windows[groups[g].active]
-        if !minimized.contains(id), let frame = elements[id].flatMap(AXWin.frame) { return frame }
+        if !minimized.contains(id), let frame = elements[id].flatMap(AXWin.frame), !isParked(frame) { return frame }
         return groups[g].frame
+    }
+
+    /// At a screen's bottom-right corner, where hidden tabs are parked.
+    private func isParked(_ frame: CGRect) -> Bool {
+        NSScreen.screens.contains { screen in
+            let s = AXWin.flipped(screen.frame)
+            return abs(frame.minX - (s.maxX - 1)) < 3 && abs(frame.minY - (s.maxY - 1)) < 3
+        }
     }
 
     private func standardWindows(_ app: NSRunningApplication) -> [AXUIElement] {
