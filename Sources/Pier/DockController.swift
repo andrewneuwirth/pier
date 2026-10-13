@@ -95,6 +95,8 @@ final class DockController {
     // MARK: Hover card
 
     func hoverChanged(_ item: AppItem, inside: Bool, frame: CGRect) {
+        // The menu can swallow the pointer leaving the right-clicked tile; any other tile ends the pause.
+        if inside, suppressedID != nil, suppressedID != item.id { suppressedID = nil }
         if suppressedID == item.id {
             if !inside { suppressedID = nil }
             return
