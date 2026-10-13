@@ -10,12 +10,13 @@ final class DockController {
     let reorder = Reorder()
     let sendBox = SendBox()
     var trashFrame: CGRect = .zero
+    var linksFrame: CGRect = .zero
     /// Where each app tile sits, for working out the drop spot during a drag.
     var tileFrames: [String: CGRect] = [:]
     private let panel = DockPanel()
     private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
     private let downloadsPopup = Popup(interactive: true)   // Downloads or the open-apps grid
-    enum Grid { case downloads, openApps }
+    enum Grid { case downloads, openApps, links }
     private var grid: Grid?
     private let hoverPopup = Popup(interactive: false)
     private var size: CGSize = .zero
@@ -147,9 +148,13 @@ final class DockController {
     private func barDrops() -> FirstClickHostingView<AnyView>.DropRouter {
         .init(over: { [weak self] point in
             guard let self, let point else { return false }
-            return self.trashFrame.contains(point) || self.item(at: point) != nil
+            return self.trashFrame.contains(point) || self.linksFrame.contains(point) || self.item(at: point) != nil
         }, drop: { [weak self] urls, point in
             guard let self, !urls.isEmpty else { return false }
+            if self.linksFrame.contains(point) {   // a link dragged from a browser's address bar
+                urls.filter { !$0.isFileURL }.forEach(self.model.addLink)
+                return true
+            }
             if self.trashFrame.contains(point) {
                 for url in urls { try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
                 return true
@@ -224,6 +229,8 @@ final class DockController {
                                 }))
         case .openApps:
             downloadsPopup.show(OpenAppsGrid(model: model, close: close), above: screenRect(frame))
+        case .links:
+            downloadsPopup.show(LinksList(model: model, controller: self, close: close), above: screenRect(frame))
         }
     }
 

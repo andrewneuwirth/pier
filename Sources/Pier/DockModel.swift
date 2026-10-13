@@ -34,6 +34,13 @@ struct GroupsFile: Codable {
     var icons: [String: String]?
     /// Your own phone number or email, for Downloads › Text Myself. Kept here, not in the code.
     var myNumber: String?
+    /// Quick Links, in order. (Perch's favorites were copied in when it was retired.)
+    var links: [Link]?
+    struct Link: Codable, Equatable, Identifiable {
+        var title: String
+        var url: String
+        var id: String { url }
+    }
 
     static let folder = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Pier")
@@ -73,6 +80,7 @@ struct GroupsFile: Codable {
 final class DockModel {
     private(set) var groups: [[AppItem]] = []
     private(set) var groupNames: [String] = []
+    private(set) var links: [GroupsFile.Link] = []
     private(set) var running: [String: NSRunningApplication] = [:]   // by AppItem.id
     /// Open, unpinned, not hidden: the 4 used most recently get tiles; the rest sit behind "+N".
     private(set) var recent: [AppItem] = []
@@ -157,6 +165,7 @@ final class DockModel {
 
     func reloadGroups() {
         file = GroupsFile.load()
+        if links != file.links ?? [] { links = file.links ?? [] }
         let loaded = file.groups.map { ($0.name, $0.apps.compactMap(AppItem.init(path:))) }.filter { !$0.1.isEmpty }
         groups = loaded.map(\.1)
         groupNames = file.groups.map(\.name)
@@ -258,6 +267,18 @@ final class DockModel {
         panel.allowedContentTypes = [.image]
         NSApp.activate()   // Pier has no windows of its own; the panel needs it frontmost
         if panel.runModal() == .OK, let url = panel.url { setIcon(url, for: item) }
+    }
+
+    func addLink(_ url: URL) {
+        guard url.scheme == "http" || url.scheme == "https", !links.contains(where: { $0.url == url.absoluteString }) else { return }
+        let title = url.host()?.replacingOccurrences(of: "www.", with: "") ?? url.absoluteString
+        file.links = links + [GroupsFile.Link(title: title, url: url.absoluteString)]
+        file.save()
+    }
+
+    func removeLink(_ link: GroupsFile.Link) {
+        file.links = links.filter { $0 != link }
+        file.save()
     }
 
     func hide(_ item: AppItem) {

@@ -72,6 +72,7 @@ struct DockView: View {
             }
             StatsCluster(model: model, controller: controller)
             GroupDivider()
+            LinksTile(controller: controller)
             DownloadsTile(controller: controller)
             TrashTile(controller: controller)
         }
@@ -765,5 +766,102 @@ private struct SendZone: View {
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { box.frame = $0 }   // drops land in AppKit (FirstClickHostingView)
         .animation(MT.Motion.allowed(MT.Motion.quick), value: file)
+    }
+}
+
+/// Quick Links: a tile that opens the list. Drop a link from a browser on it to add one.
+private struct LinksTile: View {
+    let controller: DockController
+    @State private var frame: CGRect = .zero
+    @Environment(\.tileSize) private var size
+
+    var body: some View {
+        Tile {
+            Image(systemName: "link")
+                .font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: size * 0.82, height: size * 0.82)
+                .background(LinearGradient(colors: [Color.accentColor.mix(with: .black, by: 0.15), Color.accentColor.mix(with: .black, by: 0.55)],
+                                           startPoint: .top, endPoint: .bottom),
+                            in: .rect(cornerRadius: size * 0.82 * 185 / 824, style: .continuous))
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+            frame = $0
+            controller.linksFrame = $0
+        }
+        .onTapGesture { controller.toggleGrid(.links, from: frame) }
+        .help("Quick Links")
+        .accessibilityLabel("Quick Links")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct LinksList: View {
+    let model: DockModel
+    let controller: DockController
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MT.Space.s6) {
+            HStack {
+                Text("QUICK LINKS").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
+                Spacer()
+                Button("Edit Links…") {
+                    close()
+                    controller.editGroups()
+                }
+                .buttonStyle(.glass).controlSize(.small)
+            }
+            if model.links.isEmpty {
+                Text("Drag a link from your browser onto the Links tile to add it.")
+                    .font(.system(size: 12)).foregroundStyle(Color.mtInkMuted).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(model.links) { link in
+                LinkRow(link: link) {
+                    close()
+                    if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
+                }
+                .contextMenu {
+                    Button("Copy Link") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(link.url, forType: .string)
+                    }
+                    Button("Remove Link", role: .destructive) { model.removeLink(link) }
+                }
+            }
+        }
+        .padding(MT.Space.s12)
+        .frame(width: 280)
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
+    }
+}
+
+private struct LinkRow: View {
+    let link: GroupsFile.Link
+    let open: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let host = URL(string: link.url)?.host()?.replacingOccurrences(of: "www.", with: "") ?? link.url
+        HStack(spacing: MT.Space.s10) {
+            // A letter badge drawn here, so no site's icon is fetched from the network.
+            Text(String(link.title.prefix(1)).uppercased())
+                .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Color(hue: Double(host.unicodeScalars.reduce(0) { ($0 * 31 + Int($1.value)) % 360 }) / 360, saturation: 0.48, brightness: 0.78),
+                            in: .rect(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(link.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.mtInk).lineLimit(1)
+                Text(host).font(.system(size: 10)).foregroundStyle(Color.mtInkMuted).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, MT.Space.s8)
+        .frame(height: 40)
+        .background(hovering ? Color.mtFillHover : .clear, in: .rect(cornerRadius: MT.Radius.row))
+        .contentShape(.rect(cornerRadius: MT.Radius.row))
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: open)
+        .accessibilityLabel(link.title)
+        .accessibilityAddTraits(.isButton)
     }
 }
