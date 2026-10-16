@@ -10,6 +10,10 @@ final class DockController {
     let reorder = Reorder()
     let tabs = TabGroups()
     let minimized = MinimizedWindows()
+    private lazy var clearance = DockClearance { [weak self] in
+        guard let self, self.panel.isVisible, let screen = self.screen else { return nil }
+        return (self.panel.frame.maxY, screen)
+    }
     let sendBox = SendBox()
     var trashFrame: CGRect = .zero
     var linksFrame: CGRect = .zero
@@ -45,6 +49,7 @@ final class DockController {
         panel.orderFrontRegardless()
         tabs.start()
         minimized.start()
+        clearance.start()
         // Right-clicking an app: its own Dock menu items plus Pier's. Elsewhere on the bar, Pier's menu.
         hosting.rightClick = { [weak self] point in
             guard let self, let item = self.item(at: point) else { return nil }

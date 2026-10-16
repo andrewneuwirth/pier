@@ -10,6 +10,7 @@ the owner's replacement for the macOS Dock, the first app built on the Mac Tools
 - `Downloads.swift`: ~/Downloads, newest first, watched live.
 - `WindowPreviews.swift`: ScreenCaptureKit thumbnails (Screen Recording) and raising one window (Accessibility).
 - `Panels.swift`: the bar's panel and the GlassPanel popup.
+- `DockClearance.swift`: trims windows that open or resize under the bar (the auto-hidden Dock no longer reserves that strip).
 - `DockController.swift`: hover card timing, Downloads toggle, placement.
 - `DockView.swift`: all SwiftUI.
 
