@@ -33,6 +33,7 @@ final class Popup {
     private let interactive: Bool
     private var anchor: NSRect = .zero
     private var monitors: [Any] = []
+    private var outsidePress = false
     private(set) var closedAt = Date.distantPast
     /// The app you were in when an interactive popup opened; focus goes back to it on close.
     var previous: NSRunningApplication?
@@ -68,8 +69,18 @@ final class Popup {
             }
             Pier.takeFront { [weak self] in self?.panel.makeKeyAndOrderFront(nil) }
             monitors = [
-                NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.close() }
+                // A left click elsewhere closes on release, not press: a press that turns into a drag is a file
+                // on its way to the send box (from Finder or the Desktop), and closing then left nothing to drop on.
+                NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown]) { [weak self] event in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        switch event.type {
+                        case .leftMouseDown: self.outsidePress = true
+                        case .leftMouseDragged: self.outsidePress = false
+                        case .leftMouseUp: if self.outsidePress { self.close() }
+                        default: self.close()
+                        }
+                    }
                 } as Any,
                 // By position, not event.window: the click that activates Pier can arrive without one.
                 NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -93,6 +104,7 @@ final class Popup {
         panel.orderOut(nil)
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
+        outsidePress = false
         closedAt = Date()
         if let previous, NSApp.isActive { previous.activate() }
         previous = nil
