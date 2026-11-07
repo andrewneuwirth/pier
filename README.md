@@ -8,6 +8,10 @@ its menu.
 - **Right-click**: Show Hidden Icons, Open at Login, Quit.
 - **Choose what stays visible:** turn on Show Hidden Icons, then ⌘-drag icons
   to the right of the faint divider dot (visible) or left of it (tucked).
+- **macOS 27:** the menu bar is one window and icons that don't fit go behind its «
+  chevron. Tuck sizes the divider to fill the gap between the notch and the button, so
+  it and everything left of it land in that overflow (« stays visible). Opening a tucked
+  icon works in place. Needs a notched display; without one, hiding is left to macOS.
 - Needs Accessibility (System Settings → Privacy & Security → Accessibility).
 
 How it works: a second, invisible status item sits left of the button and

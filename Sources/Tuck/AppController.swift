@@ -14,8 +14,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var outsideClick: Any?
     private var rehideTimer: Timer?
 
-    private let hiddenLength: CGFloat = 10_000
+    private lazy var hiddenLength: CGFloat = systemOverflow ? shownLength : 10_000   // macOS 27: see fitHiddenLength
     private let shownLength: CGFloat = 14
+    private var anchor = NSPoint.zero   // where the button was clicked; the panel hangs below it
+
+    /// macOS 27 draws the whole menu bar in one window and moves items that don't fit into
+    /// its own overflow (behind a « chevron), and drops a 10,000 pt item from the bar entirely.
+    private let systemOverflow = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0))
 
     private var hiding: Bool {
         get { !UserDefaults.standard.bool(forKey: "showAll") }
@@ -54,6 +60,11 @@ final class AppController: NSObject, NSApplicationDelegate {
             b.appearsDisabled = true
         }
         applyHiding()
+        if systemOverflow {
+            fitHiddenLength()
+            NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                                   object: nil, queue: .main) { [weak self] _ in self?.fitHiddenLength() }
+        }
 
         panel.contentViewController = hosting
         panel.onEscape = { [weak self] in self?.closePanel() }
@@ -75,6 +86,27 @@ final class AppController: NSObject, NSApplicationDelegate {
         divider.button?.alphaValue = hiding ? 0 : 1
     }
 
+    /// macOS 27: the divider fills the gap between the notch and the button. That's too wide
+    /// to fit beside the other icons, so the divider and everything left of it go into the
+    /// system overflow, yet narrow enough that macOS keeps it in the bar instead of dropping it.
+    /// Without a notch there is no such width, so hiding is left to macOS.
+    private func fitHiddenLength() {
+        divider.length = shownLength   // measure with the divider back in the bar, beside Tuck
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {   // Tuck answers its own AX on main
+            let tuck = BarItems.ownItemFrame("Tuck"), div = BarItems.ownItemFrame("Tuck divider")
+            DispatchQueue.main.async {
+                var length = self.shownLength
+                if let tuck, let div, div.minX < tuck.minX,   // divider right of Tuck would tuck Tuck itself
+                   let notch = NSScreen.screens.first(where: { $0.frame.minX <= tuck.midX && tuck.midX < $0.frame.maxX })?
+                       .auxiliaryTopRightArea {
+                    length = max(tuck.minX - notch.minX, self.shownLength)
+                }
+                self.hiddenLength = length
+                self.applyHiding()
+            }
+        }
+    }
+
     private func setTemporarilyShown(_ shown: Bool) {
         guard hiding else { return }
         divider.length = shown ? shownLength : hiddenLength
@@ -82,7 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private var dividerMidX: CGFloat? {
-        guard let w = divider.button?.window else { return nil }
+        guard !systemOverflow, let w = divider.button?.window else { return nil }
         return w.frame.maxX   // anything left of the divider's right edge is tucked
     }
 
@@ -90,6 +122,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     @objc private func buttonClicked() {
         if NSApp.currentEvent?.type == .rightMouseUp { showMenu(); return }
+        anchor = NSEvent.mouseLocation
         panel.isVisible ? closePanel() : showPanel()
     }
 
@@ -114,6 +147,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc private func toggleShowAll() {
         hiding.toggle()
         applyHiding()
+        if systemOverflow && hiding { fitHiddenLength() }   // the divider may have been ⌘-dragged
     }
 
     @objc private func toggleLogin() {
@@ -147,12 +181,12 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func positionPanel() {
-        guard let bw = button.button?.window else { return }
+        // Not the button's window frame: on macOS 27 status items have no real window of their own.
         let size = hosting.sizeThatFits(in: CGSize(width: 260, height: 2000))
-        let screen = bw.screen ?? NSScreen.main
-        var x = bw.frame.midX - size.width / 2
+        let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
+        var x = anchor.x - size.width / 2
         if let s = screen?.visibleFrame { x = min(max(x, s.minX + MT.Space.s8), s.maxX - size.width - MT.Space.s8) }
-        let y = bw.frame.minY - size.height - MT.Space.s6
+        let y = (screen?.visibleFrame.maxY ?? anchor.y) - size.height - MT.Space.s6
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 
@@ -165,7 +199,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func openItem(_ item: BarItem) {
         closePanel()
-        let reveal = item.hidden && hiding
+        let reveal = item.hidden && hiding && !systemOverflow   // macOS 27 opens overflowed items in place
         if reveal { setTemporarilyShown(true) }
         let el = item.element
         DispatchQueue.global(qos: .userInitiated).async {
