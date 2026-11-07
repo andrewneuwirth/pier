@@ -23,7 +23,7 @@ final class DockController {
     private let panel = DockPanel()
     private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
     private let downloadsPopup = Popup(interactive: true)   // Downloads or the open-apps grid
-    enum Grid { case downloads, openApps, links, projectLinks }
+    enum Grid { case downloads, openApps, macTools, links, projectLinks }
     private var grid: Grid?
     private let hoverPopup = Popup(interactive: false)
     private var size: CGSize = .zero
@@ -330,6 +330,9 @@ final class DockController {
                                 }))
         case .openApps:
             downloadsPopup.show(OpenAppsGrid(model: model, close: close), above: screenRect(frame))
+        case .macTools:
+            downloadsPopup.show(OpenAppsGrid(model: model, title: "MAC TOOLS", items: DockModel.macTools(), close: close),
+                                above: screenRect(frame))
         case .links:
             downloadsPopup.show(LinksList(kind: .quick, model: model, controller: self, close: close), above: screenRect(frame))
         case .projectLinks:

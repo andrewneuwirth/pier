@@ -5,13 +5,20 @@ import MacToolsKit
 /// NSWorkspace icons are expensive to fetch on every redraw.
 @MainActor
 enum IconCache {
-    private static var icons: [String: NSImage] = [:]
-    private static var apps: [String: (source: String, image: NSImage)] = [:]
+    private static var icons: [String: (stamp: Date?, image: NSImage)] = [:]
+    private static var apps: [String: (source: String, stamp: Date?, image: NSImage)] = [:]
+
+    /// The bundle's modification date: a reinstall at the same path (rebuilt app, update) changes it,
+    /// so its new icon is read instead of the cached one.
+    private static func stamp(_ path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    }
 
     static func icon(_ path: String) -> NSImage {
-        if let icon = icons[path] { return icon }
+        let stamp = stamp(path)
+        if let hit = icons[path], hit.stamp == stamp { return hit.image }
         let icon = NSWorkspace.shared.icon(forFile: path)
-        icons[path] = icon
+        icons[path] = (stamp, icon)
         return icon
     }
 
@@ -20,17 +27,18 @@ enum IconCache {
     /// image in its bundle). Apps that only swap the icon in memory can't be read from outside.
     static func appIcon(_ item: AppItem, override: String?) -> NSImage {
         let source = source(item, override: override)
-        if let cached = apps[item.url.path], cached.source == source { return cached.image }
+        let stamp = stamp(item.url.path)
+        if let cached = apps[item.url.path], cached.source == source, cached.stamp == stamp { return cached.image }
         let image = source.isEmpty ? nil : NSImage(contentsOfFile: source)
         let result = image ?? icon(item.url.path)
-        apps[item.url.path] = (source, result)
+        apps[item.url.path] = (source, stamp, result)
         return result
     }
 
-    /// True when the app's chosen icon changed since it was last drawn.
+    /// True when the app's chosen icon changed, or the app was reinstalled, since it was last drawn.
     static func changed(_ item: AppItem, override: String?) -> Bool {
         guard let cached = apps[item.url.path] else { return false }
-        return cached.source != source(item, override: override)
+        return cached.source != source(item, override: override) || cached.stamp != stamp(item.url.path)
     }
 
     private static func source(_ item: AppItem, override: String?) -> String {
@@ -79,6 +87,7 @@ struct DockView: View {
             }
             LinksTile(controller: controller, kind: .quick)
             LinksTile(controller: controller, kind: .projects)
+            MacToolsTile(controller: controller)
             DownloadsTile(controller: controller)
             TrashTile(controller: controller)
         }
@@ -696,14 +705,17 @@ private struct DownloadCell: View {
 
 struct OpenAppsGrid: View {
     let model: DockModel
+    var title = "ALSO OPEN"
+    var items: [AppItem]? = nil   // nil: the apps that didn't fit on the bar
     let close: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MT.Space.s10) {
-            Text("ALSO OPEN").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(72), spacing: MT.Space.s8), count: min(5, max(model.overflow.count, 1))),
+            let items = items ?? model.overflow
+            Text(title).font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(72), spacing: MT.Space.s8), count: min(5, max(items.count, 1))),
                       spacing: MT.Space.s8) {
-                ForEach(model.overflow) { item in
+                ForEach(items) { item in
                     OpenAppCell(item: item, model: model, close: close)
                 }
             }
@@ -795,18 +807,11 @@ private struct LinksTile: View {
     let controller: DockController
     let kind: DockModel.LinkKind
     @State private var frame: CGRect = .zero
-    @Environment(\.tileSize) private var size
 
     var body: some View {
         let quick = kind == .quick
         Tile {
-            Image(systemName: quick ? "link" : "server.rack")
-                .font(.system(size: size * 0.40, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: size * 0.82, height: size * 0.82)
-                .background(LinearGradient(colors: [(quick ? Color.accentColor : Color.mtProjects).mix(with: .black, by: 0.15),
-                                                    (quick ? Color.accentColor : Color.mtProjects).mix(with: .black, by: 0.55)],
-                                           startPoint: .top, endPoint: .bottom),
-                            in: .rect(cornerRadius: size * 0.82 * 185 / 824, style: .continuous))
+            GlyphIcon(symbol: quick ? "link" : "server.rack", color: quick ? .accentColor : .mtProjects)
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
             frame = $0
@@ -816,6 +821,37 @@ private struct LinksTile: View {
         .help(quick ? "Quick Links" : "Projects")
         .accessibilityLabel(quick ? "Quick Links" : "Projects")
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A white SF Symbol on a dark gradient of `color`, sized like an app icon: the links tiles and Mac Tools.
+private struct GlyphIcon: View {
+    let symbol: String
+    let color: Color
+    @Environment(\.tileSize) private var size
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.40, weight: .semibold)).foregroundStyle(.white)
+            .frame(width: size * 0.82, height: size * 0.82)
+            .background(LinearGradient(colors: [color.mix(with: .black, by: 0.15), color.mix(with: .black, by: 0.55)],
+                                       startPoint: .top, endPoint: .bottom),
+                        in: .rect(cornerRadius: size * 0.82 * 185 / 824, style: .continuous))
+    }
+}
+
+/// the owner's own Mac Tools apps (every com.example.* app in /Applications), in the apps grid.
+private struct MacToolsTile: View {
+    let controller: DockController
+    @State private var frame: CGRect = .zero
+
+    var body: some View {
+        Tile { GlyphIcon(symbol: "hammer.fill", color: .mtGood) }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+            .onTapGesture { controller.toggleGrid(.macTools, from: frame) }
+            .help("Mac Tools")
+            .accessibilityLabel("Mac Tools")
+            .accessibilityAddTraits(.isButton)
     }
 }
 

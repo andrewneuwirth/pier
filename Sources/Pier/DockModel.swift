@@ -265,6 +265,16 @@ final class DockModel {
         file.save()
     }
 
+    /// Every app in /Applications whose bundle id starts with com.example., by name. Read each time
+    /// the grid opens, so a newly installed tool shows up without restarting Pier.
+    static func macTools() -> [AppItem] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: "/Applications")) ?? []
+        return names.filter { $0.hasSuffix(".app") }
+            .compactMap { AppItem(path: "/Applications/" + $0) }
+            .filter { $0.bundleID?.hasPrefix("com.example.") == true }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     func icon(for item: AppItem) -> NSImage {
         _ = iconVersion   // redraw when a chosen icon changes
         return IconCache.appIcon(item, override: file.icons?[item.id])
