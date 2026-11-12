@@ -107,7 +107,17 @@ final class UsagePoller {
             func w(_ x: UsageWindow?) -> UsageSnapshot.Window? { x.map { .init(percent: $0.percent.rounded(), resetsAt: $0.resetsAt) } }
             return .init(short: w(u.short), long: w(u.long), note: u.note, failed: u.failed, stale: u.stale)
         }
-        let snap = UsageSnapshot(claude: shared(readings[.claude]), chatgpt: shared(readings[.chatgpt]), updated: Date())
+        // A refusal right after launch has no in-memory reading to hold, so fall back to the last good one on disk:
+        // a restart during a 429 cooldown must not blank a ring that was showing a real number.
+        let disk = UsageSnapshot.read()
+        func held(_ new: UsageSnapshot.Reading?, _ old: UsageSnapshot.Reading?) -> UsageSnapshot.Reading? {
+            guard let new, new.failed, var old, !old.failed else { return new }
+            old.stale = true
+            old.note = new.note
+            return old
+        }
+        let snap = UsageSnapshot(claude: held(shared(readings[.claude]), disk?.claude),
+                                 chatgpt: held(shared(readings[.chatgpt]), disk?.chatgpt), updated: Date())
         if snap.write() { onChange() }
     }
 }
