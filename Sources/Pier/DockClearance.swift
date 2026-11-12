@@ -4,16 +4,18 @@ import ApplicationServices
 /// Keeps windows above the bar, the way the macOS Dock does. With the real Dock auto-hidden, macOS
 /// counts the bottom of the screen as free, so new windows, Fill and zoom run under Pier. A window
 /// that opens or resizes into the bar's strip is trimmed (or, if it won't shrink, lifted) to end above it.
-/// Dragging a window down by hand is left alone, as the real Dock allows.
+/// Dragging a window down by hand is left alone, as the real Dock allows. With the bar on the right
+/// edge it is the same along the bar's left line: trimmed narrower, or slid left.
 @MainActor
 final class DockClearance {
-    /// The bar's top edge in AppKit coordinates, and its screen; nil while the bar isn't showing.
-    var bar: () -> (top: CGFloat, screen: NSScreen)?
+    /// The bar's inner line in AppKit coordinates (its top at the bottom edge, its left at the right
+    /// edge), and its screen; nil while the bar isn't showing.
+    var bar: () -> (edge: DockEdge, line: CGFloat, screen: NSScreen)?
     private var observers: [pid_t: AXObserver] = [:]
     private var workspace: [NSObjectProtocol] = []
     private var pending: [WinID: DispatchWorkItem] = [:]
 
-    init(bar: @escaping () -> (top: CGFloat, screen: NSScreen)?) { self.bar = bar }
+    init(bar: @escaping () -> (edge: DockEdge, line: CGFloat, screen: NSScreen)?) { self.bar = bar }
 
     func start() {
         guard AXIsProcessTrusted() else { return }
@@ -68,7 +70,16 @@ final class DockClearance {
               (AXWin.attribute(element, kAXMinimizedAttribute) as? Bool) != true,
               let frame = AXWin.frame(element) else { return }
         let screen = AXWin.flipped(bar.screen.frame)
-        let line = AXWin.mainHeight - bar.top
+        if bar.edge == .right {   // x reads the same in both coordinate systems
+            guard let wanted = Self.clearedRight(frame, line: bar.line, screen: screen) else { return }
+            AXWin.setFrame(element, wanted)
+            // Some windows won't go narrower than a minimum: slide those left instead, staying on this screen.
+            if let now = AXWin.frame(element), now.maxX > bar.line + 1 {
+                AXWin.setFrame(element, CGRect(x: max(screen.minX, bar.line - now.width), y: now.minY, width: now.width, height: now.height))
+            }
+            return
+        }
+        let line = AXWin.mainHeight - bar.line
         guard let wanted = Self.cleared(frame, line: line, screen: screen) else { return }
         AXWin.setFrame(element, wanted)
         // Some windows won't go shorter than a minimum: lift those instead, keeping the menu bar clear.
@@ -85,6 +96,14 @@ final class DockClearance {
         guard frame.maxY > line + 1, frame.minY < line, frame.minX < screen.maxX, frame.maxX > screen.minX,
               frame.minY >= screen.minY, frame.minY < screen.maxY else { return nil }
         return CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: line - frame.minY)
+    }
+
+    /// The right-edge twin: the frame that ends at the bar's left `line`, or nil when the window doesn't
+    /// reach under it on that screen. One that starts right of the line (a parked tab) is left alone.
+    nonisolated static func clearedRight(_ frame: CGRect, line: CGFloat, screen: CGRect) -> CGRect? {
+        guard frame.maxX > line + 1, frame.minX < line, frame.minY < screen.maxY, frame.maxY > screen.minY
+        else { return nil }
+        return CGRect(x: frame.minX, y: frame.minY, width: line - frame.minX, height: frame.height)
     }
 }
 

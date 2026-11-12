@@ -121,6 +121,8 @@ final class DockModel {
     /// Icon size; shrinks when the bar would be wider than the screen, as the macOS Dock does.
     var tileSize: CGFloat = maxTile
     nonisolated static let maxTile: CGFloat = 48, minTile: CGFloat = 24
+    /// Set through DockController.setEdge, which also saves it.
+    var edge = DockEdge.saved
 
     let finder = AppItem(path: "/System/Library/CoreServices/Finder.app")!
 
@@ -415,4 +417,17 @@ final class DockModel {
         // Redraw only when the ring's whole-number percent changes, not on every byte of churn.
         if (used / memoryTotal * 100).rounded() != (memoryUsed / memoryTotal * 100).rounded() { memoryUsed = used }
     }
+}
+
+/// The screen edge the bar sits on (Position in the bar's menu). "Along" is the way the tiles run;
+/// "across" points at the screen edge.
+enum DockEdge: String, CaseIterable {
+    case bottom, right
+
+    static var saved: DockEdge { UserDefaults.standard.string(forKey: "edge").flatMap { DockEdge(rawValue: $0) } ?? .bottom }
+    var title: String { rawValue.capitalized }
+
+    func along(_ point: CGPoint) -> CGFloat { self == .bottom ? point.x : point.y }
+    func along(_ size: CGSize) -> CGFloat { self == .bottom ? size.width : size.height }
+    func across(_ size: CGSize) -> CGFloat { self == .bottom ? size.height : size.width }
 }

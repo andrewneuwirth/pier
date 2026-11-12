@@ -12,12 +12,18 @@ the owner's replacement for the macOS Dock, the first app built on the Mac Tools
 - `Panels.swift`: the bar's panel and the GlassPanel popup.
 - `DockClearance.swift`: trims windows that open or resize under the bar (the auto-hidden Dock no longer reserves that strip).
 - `DockController.swift`: hover card timing, Downloads toggle, placement.
+- `AppSearch.swift`: Search's ranking for apps, settings and links (`SearchRank`) and for files (`FileRank`), pure Foundation, checked by `--self-check`.
+- `Screenshots.swift`: Search's Screenshots tab: the newest captures from the `com.apple.screencapture location` folder (else the Desktop), watched only while the panel is open, cached Quick Look thumbnails, ⌘C copies the image. Also always watches `$TMPDIR/TemporaryItems/NSIRD_screencaptureui_*` (FSEvents): a capture dragged out of the floating preview is never saved by macOS, so ~10 s after its preview closes Pier copies it into the screenshot folder (never when a file of that name is already there). The distributed notification `com.example.pier.pasteScreenshot` puts the newest capture of the last 10 minutes on the clipboard and sends ⌘V (needs Accessibility); nothing that recent beeps.
+- `FileSearch.swift`: files by name from the Spotlight index (`FileQuery`, cancellable, off the main thread) and Quick Look for the selected file.
+- `AppSearchIndex.swift`: the index of apps and System Settings panes (built off the main thread, rebuilt when an Applications folder changes), scopes and grouped sections, launch counts in UserDefaults, the Spotlight-style panel's controller and keys, and the Option-Space and Command-Space hot keys (Command-Space only fires once Spotlight's own shortcut is turned off in System Settings; Pier reads that setting, never writes it).
 - `DockView.swift`: all SwiftUI.
 
 ## Commands
 
 ```sh
 swift build              # compile check
+swift run Pier --self-check   # ranking checks, prints "self-check ok"; starts nothing
+swift run Pier --ui-check DIR # opens the real search panel (no bar), drives it with keys sent to Pier only, saves two screenshots to DIR; takes the keyboard for ~5 s
 ./build.sh               # build/Pier.app
 ./build.sh --install     # replace /Applications/Pier.app and relaunch: only when the owner asks
 ```

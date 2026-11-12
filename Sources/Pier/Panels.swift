@@ -18,7 +18,8 @@ final class DockPanel: NSPanel {
     override var canBecomeKey: Bool { false }
 }
 
-/// A GlassPanel from the design system: opens 6pt above its anchor, stays 8pt inside the screen,
+/// A GlassPanel from the design system: opens 6pt above its anchor (to its left when the bar is on
+/// the right edge), or without an anchor centred in the upper third of the main screen (Search); stays 8pt inside the screen,
 /// and (when `interactive`) closes on an outside click or Escape.
 @MainActor
 final class Popup {
@@ -31,12 +32,18 @@ final class Popup {
                               backing: .buffered, defer: false)
     private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
     private let interactive: Bool
-    private var anchor: NSRect = .zero
+    private var anchor: NSRect?
+    /// Where an unanchored popup sits; chosen when it opens, so it never jumps screens while it grows.
+    private var centredOn: NSScreen?
+    private var edge = DockEdge.bottom
     private var monitors: [Any] = []
     private(set) var closedAt = Date.distantPast
     /// The app you were in when an interactive popup opened; focus goes back to it on close.
     var previous: NSRunningApplication?
     var isVisible: Bool { panel.isVisible }
+    var window: NSWindow { panel }
+    /// Whatever else has to go when the popup does (Search's Quick Look).
+    var onClose: (() -> Void)?
 
     init(interactive: Bool) {
         self.interactive = interactive
@@ -46,13 +53,23 @@ final class Popup {
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.hidesOnDeactivate = false
+        // Said out loud, this turns off a see-through window's habit of letting clicks on its clear pixels
+        // fall to the app behind. Glass is clear to the window server everywhere but its text and icons, so a
+        // click on an empty part of a popup went to the other app, which counted as a click outside and closed it.
+        panel.ignoresMouseEvents = false
         hosting.sizingOptions = []
         panel.contentView = hosting
         hosting.acceptDrops()
     }
 
-    func show(_ view: some View, above anchor: NSRect, drop: FirstClickHostingView<AnyView>.DropRouter? = nil) {
+    func show(_ view: some View, from anchor: NSRect?, edge: DockEdge, drop: FirstClickHostingView<AnyView>.DropRouter? = nil) {
         self.anchor = anchor
+        // The screen the pointer is on (Spotlight does the same), so it opens on the monitor in use.
+        let pointer = NSEvent.mouseLocation
+        centredOn = anchor == nil
+            ? NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens.first
+            : nil
+        self.edge = edge
         hosting.dropRouter = drop
         // A fresh identity per show: the hosting view is reused, and without this SwiftUI keeps the
         // previous card's @State (and skips its .task), so every card showed the first app's memory.
@@ -66,10 +83,17 @@ final class Popup {
             if NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid() {
                 previous = NSWorkspace.shared.frontmostApplication
             }
-            Pier.takeFront { [weak self] in self?.panel.makeKeyAndOrderFront(nil) }
+            Pier.takeFront { [weak self] in
+                guard let self, self.panel.isVisible else { return }
+                self.panel.makeKeyAndOrderFront(nil)
+                self.focusTextField()
+            }
             monitors = [
+                // By position here too: no click inside the popup closes it, whoever the click was delivered to.
                 NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.close() }
+                    MainActor.assumeIsolated {
+                        if let self, !self.panel.frame.contains(NSEvent.mouseLocation) { self.close() }
+                    }
                 } as Any,
                 // By position, not event.window: the click that activates Pier can arrive without one.
                 NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -88,21 +112,50 @@ final class Popup {
         }
     }
 
-    func close() {
+    /// `restoreFocus: false` when closing because something was just opened: handing the keyboard back to the
+    /// previous app then fought the app being launched for the front.
+    func close(restoreFocus: Bool = true) {
         guard panel.isVisible else { return }
         panel.orderOut(nil)
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
         closedAt = Date()
-        if let previous, NSApp.isActive { previous.activate() }
+        onClose?()
+        if restoreFocus, let previous, NSApp.isActive { previous.activate() }
         previous = nil
     }
 
+    /// Puts the cursor in the popup's text field, if it has one. SwiftUI's own focus request runs in onAppear,
+    /// before the panel is key, and is dropped whenever the panel becomes key late (every open after the first).
+    private func focusTextField() {
+        func field(in view: NSView) -> NSTextField? {
+            if let f = view as? NSTextField, f.isEditable { return f }
+            for sub in view.subviews { if let f = field(in: sub) { return f } }
+            return nil
+        }
+        if let f = field(in: hosting) { panel.makeFirstResponder(f) }
+    }
+
     private func place(_ size: CGSize) {
-        guard size.width > 0, let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) }) ?? NSScreen.main
-        else { return }
-        let x = min(max(anchor.midX - size.width / 2, screen.frame.minX + 8), screen.frame.maxX - 8 - size.width)
-        panel.setFrame(NSRect(x: x, y: anchor.maxY + 6, width: size.width, height: size.height), display: true)
+        guard size.width > 0 else { return }
+        guard let anchor else {
+            // Like Spotlight: the top edge stays put in the upper third and the results grow downward.
+            guard let area = centredOn?.frame else { return }
+            panel.setFrame(NSRect(x: (area.midX - size.width / 2).rounded(), y: (area.maxY - area.height * 0.22 - size.height).rounded(),
+                                  width: size.width, height: size.height), display: true)
+            return
+        }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) }) ?? NSScreen.main else { return }
+        let origin: CGPoint
+        switch edge {
+        case .bottom:
+            origin = CGPoint(x: min(max(anchor.midX - size.width / 2, screen.frame.minX + 8), screen.frame.maxX - 8 - size.width),
+                             y: anchor.maxY + 6)
+        case .right:
+            origin = CGPoint(x: max(anchor.minX - 6 - size.width, screen.frame.minX + 8),
+                             y: max(min(anchor.midY - size.height / 2, screen.visibleFrame.maxY - 8 - size.height), screen.frame.minY + 8))
+        }
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }
 

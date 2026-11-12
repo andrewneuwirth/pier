@@ -55,6 +55,38 @@ enum IconCache {
 
 extension EnvironmentValues {
     @Entry var tileSize: CGFloat = DockModel.maxTile
+    @Entry var dockEdge = DockEdge.bottom
+}
+
+/// How the bar's views turn with the edge, so they are written once.
+extension DockEdge {
+    /// Tiles one after another along the bar.
+    func stack(spacing: CGFloat, @ViewBuilder _ content: () -> some View) -> some View {
+        (self == .bottom ? AnyLayout(HStackLayout(spacing: spacing)) : AnyLayout(VStackLayout(spacing: spacing))) { content() }
+    }
+    /// An icon, then what sits between it and the screen edge (the running dot).
+    func cross(spacing: CGFloat, @ViewBuilder _ content: () -> some View) -> some View {
+        (self == .bottom ? AnyLayout(VStackLayout(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))) { content() }
+    }
+    var screenSide: Edge.Set { self == .bottom ? .bottom : .trailing }
+    var headroom: Edge.Set { self == .bottom ? .top : .leading }
+    var alongAxis: Edge.Set { self == .bottom ? .horizontal : .vertical }
+    var acrossAxis: Edge.Set { self == .bottom ? .vertical : .horizontal }
+    var anchor: UnitPoint { self == .bottom ? .bottom : .trailing }
+    /// Positive `across` moves toward the screen edge.
+    func offset(along: CGFloat = 0, across: CGFloat = 0) -> CGSize {
+        self == .bottom ? CGSize(width: along, height: across) : CGSize(width: across, height: along)
+    }
+    /// Where the drop line goes on a tile: its start or its end, along the bar.
+    func side(after: Bool) -> Alignment {
+        self == .bottom ? (after ? .trailing : .leading) : (after ? .bottom : .top)
+    }
+}
+
+private extension View {
+    func frame(_ edge: DockEdge, along: CGFloat? = nil, across: CGFloat? = nil) -> some View {
+        frame(width: edge == .bottom ? along : across, height: edge == .bottom ? across : along)
+    }
 }
 
 struct DockView: View {
@@ -63,7 +95,8 @@ struct DockView: View {
 
     var body: some View {
         let model = controller.model
-        HStack(spacing: MT.Space.s4) {
+        let edge = model.edge
+        edge.stack(spacing: MT.Space.s4) {
             AppTile(item: model.finder, controller: controller)
             ForEach(Array(model.groups.enumerated()), id: \.offset) { _, group in
                 GroupDivider()
@@ -75,9 +108,7 @@ struct DockView: View {
                 if !model.overflow.isEmpty { OverflowTile(controller: controller) }
             }
             GroupDivider()
-            if let playing = controller.nowPlaying.item {
-                NowPlayingTile(item: playing, nowPlaying: controller.nowPlaying, controller: controller)
-            }
+            SearchTile(controller: controller)
             StatsCluster(model: model, controller: controller)
             GroupDivider()
             if !controller.minimized.windows.isEmpty {
@@ -94,6 +125,7 @@ struct DockView: View {
         .padding(MT.Space.s6)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
         .environment(\.tileSize, model.tileSize)
+        .environment(\.dockEdge, edge)
         .contextMenu {
             Button("Edit Groups…") { controller.editGroups() }
             Menu("Show On") {
@@ -102,22 +134,32 @@ struct DockView: View {
                                                set: { if $0 { controller.show(on: name) } }))
                 }
             }
+            Menu("Position") {
+                ForEach(DockEdge.allCases, id: \.self) { choice in
+                    Toggle(choice.title, isOn: Binding(get: { edge == choice }, set: { if $0 { controller.setEdge(choice) } }))
+                }
+            }
             Toggle("Open at Login", isOn: $openAtLogin)
             Divider()
             Button("Quit Pier") { controller.quit() }
         }
         .onChange(of: openAtLogin) { _, on in LoginItem.set(on) }
+        // Clear headroom beyond the glass, so a bouncing or hovered icon isn't clipped by the window edge.
+        .fixedSize().padding(edge.headroom, 12)
     }
 }
 
 private struct GroupDivider: View {
+    @Environment(\.dockEdge) private var edge
+
     var body: some View {
-        Capsule().fill(Color.mtRingTrack).frame(width: 1, height: 32).padding(.horizontal, MT.Space.s4)
-            .padding(.bottom, 7)   // centred on the icons, not the running dots
+        Capsule().fill(Color.mtRingTrack).frame(edge, along: 1, across: 32).padding(edge.alongAxis, MT.Space.s4)
+            .padding(edge.screenSide, 7)   // centred on the icons, not the running dots
     }
 }
 
-/// An icon with the running dot under it, as every tile in the bar is laid out.
+/// An icon with the running dot under it (beside it, toward the screen, on the right edge), as every
+/// tile in the bar is laid out.
 private struct Tile<Icon: View>: View {
     var running = false
     /// Replaces the running dot's colour: amber needs you, green finished.
@@ -126,19 +168,20 @@ private struct Tile<Icon: View>: View {
     var bounce = 0
     @ViewBuilder var icon: Icon
     @Environment(\.tileSize) private var size
+    @Environment(\.dockEdge) private var edge
     @State private var hovering = false
 
     var body: some View {
-        VStack(spacing: 3) {
+        edge.cross(spacing: 3) {
             icon.frame(width: size, height: size)
                 .phaseAnimator(MT.Motion.allowed(.default) == nil ? [0] : [0, -10, 0, -5, 0], trigger: bounce) { icon, lift in
-                    icon.offset(y: lift)
+                    icon.offset(edge.offset(across: lift))
                 } animation: { _ in .spring(response: 0.22, dampingFraction: 0.6) }
             Circle().fill(attention?.color ?? Color.mtInk.opacity(running ? 0.75 : 0))
                 .frame(width: attention == nil ? 4 : 6, height: attention == nil ? 4 : 6)
-                .frame(height: 4)
+                .frame(edge, across: 4)
         }
-        .scaleEffect(hovering ? 1.08 : 1, anchor: .bottom)
+        .scaleEffect(hovering ? 1.08 : 1, anchor: edge.anchor)
         .animation(MT.Motion.allowed(MT.Motion.quick), value: hovering)
         .contentShape(.rect)
         .onHover { hovering = $0 }
@@ -149,6 +192,7 @@ private struct AppTile: View {
     let item: AppItem
     let controller: DockController
     @State private var frame: CGRect = .zero
+    @Environment(\.dockEdge) private var edge
 
     var body: some View {
         let model = controller.model
@@ -157,7 +201,8 @@ private struct AppTile: View {
             Image(nsImage: model.icon(for: item)).resizable().interpolation(.high)
         }
         .overlay(alignment: .topTrailing) {
-            if let badge = model.badges[item.id] { Badge(text: badge) }
+            // Past the running dot's strip, onto the icon's own corner (no change at the bottom edge).
+            if let badge = model.badges[item.id] { Badge(text: badge).padding(edge.screenSide, 7) }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
             frame = $0
@@ -168,7 +213,7 @@ private struct AppTile: View {
             controller.closeCard()
             model.open(item)
         }
-        // Reorder by dragging inside the bar; drag up off it to remove. (A system drag session
+        // Reorder by dragging inside the bar; drag off it, away from the screen edge, to remove. (A system drag session
         // never reached the bar's own drop targets, so this is a plain gesture.)
         .offset(reorder.dragging == item.id ? reorder.offset : .zero)
         .opacity(reorder.dragging == item.id && reorder.removing ? 0.35 : 1)
@@ -176,10 +221,10 @@ private struct AppTile: View {
         .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { controller.dragChanged(item, $0) }
             .onEnded { controller.dragEnded(item, $0) })
-        .overlay(alignment: reorder.target?.after == true ? .trailing : .leading) {
+        .overlay(alignment: edge.side(after: reorder.target?.after == true)) {
             if reorder.target?.id == item.id {
-                Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 4)
-                    .offset(x: reorder.target?.after == true ? 4 : -4)
+                Capsule().fill(Color.accentColor).frame(edge, along: 3).padding(edge.acrossAxis, 4)
+                    .offset(edge.offset(along: reorder.target?.after == true ? 4 : -4))
             }
         }
         // Right-click is handled by DockController (the app's own Dock items plus Pier's).
@@ -255,44 +300,6 @@ private struct OverflowTile: View {
     }
 }
 
-private struct NowPlayingTile: View {
-    let item: NowPlaying.Item
-    let nowPlaying: NowPlaying
-    let controller: DockController
-    @State private var frame: CGRect = .zero
-
-    var body: some View {
-        HStack(spacing: MT.Space.s8) {
-            Image(nsImage: IconCache.icon(NSWorkspace.shared.urlForApplication(withBundleIdentifier: item.bundleID)?.path ?? ""))
-                .resizable().frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Color.mtInk)
-                Text(item.subtitle).font(.system(size: 10)).foregroundStyle(Color.mtInkMuted)
-            }
-            .lineLimit(1)
-            .frame(maxWidth: 150, alignment: .leading)
-            Button {
-                nowPlaying.playPause()
-            } label: {
-                Image(systemName: item.playing ? "pause.fill" : "play.fill").font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.mtInk)
-            .accessibilityLabel(item.playing ? "Pause" : "Play")
-        }
-        .padding(.leading, MT.Space.s6)
-        .padding(.trailing, MT.Space.s8)
-        .frame(height: 40)
-        .contentShape(.rect)
-        .onTapGesture { nowPlaying.reveal() }
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
-        .onHover { controller.nowPlayingHover($0, frame: frame) }
-        .padding(.bottom, 7)
-    }
-}
-
 private struct DownloadsTile: View {
     let controller: DockController
     @State private var frame: CGRect = .zero
@@ -331,12 +338,13 @@ private struct StatsCluster: View {
     let model: DockModel
     let controller: DockController
     @State private var memFrame: CGRect = .zero
+    @Environment(\.dockEdge) private var edge
 
     var body: some View {
         let gb = 1_073_741_824.0
         let memPercent = model.memoryUsed / model.memoryTotal * 100
         GlassEffectContainer(spacing: 0) {
-            HStack(spacing: MT.Space.s4) {
+            edge.stack(spacing: MT.Space.s4) {
                 usageRing("Claude", model.usage?.claude, tint: .mtClaude)
                 usageRing("ChatGPT", model.usage?.chatgpt, tint: .mtChatGPT)
                 MiniRing(percent: memPercent, secondary: nil, label: "MEM", base: .mtInk,
@@ -351,7 +359,7 @@ private struct StatsCluster: View {
                 ThermalBadge(state: model.thermal)
             }
         }
-        .padding(.bottom, 7)
+        .padding(edge.screenSide, 7)
     }
 
     private func usageRing(_ name: String, _ reading: UsageSnapshot.Reading?, tint: Color) -> some View {
@@ -638,7 +646,7 @@ struct DownloadsGrid: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 let rows = (model.items.count + Self.columns - 1) / Self.columns
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(Self.cell), spacing: MT.Space.s8), count: Self.columns),
                               spacing: MT.Space.s8) {
                         ForEach(model.items) { item in
@@ -855,6 +863,311 @@ private struct MacToolsTile: View {
     }
 }
 
+/// Search: click it, or press Option-Space (or Command-Space) anywhere.
+private struct SearchTile: View {
+    let controller: DockController
+
+    var body: some View {
+        Tile { GlyphIcon(symbol: "magnifyingglass", color: .mtInkMuted) }
+            .onTapGesture { controller.toggleSearch() }
+            .help("Search (⌥Space)")
+            .accessibilityLabel("Search")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The search panel, Spotlight-style: a big glass field and, under it, tabs and the results grouped by kind
+/// (a grid of thumbnails in the Screenshots tab). The arrow keys, Return, ⌘1 to ⌘4, ⌘C and Space are handled by
+/// SearchPanelController.
+struct SearchPanel: View {
+    @Bindable var search: AppSearch
+    let model: DockModel
+    let open: (SearchItem) -> Void
+    /// A row was dragged out and dropped somewhere that took it.
+    let dropped: () -> Void
+    @FocusState private var focused: Bool
+    @State private var listHeight: CGFloat = 0
+    private static let width: CGFloat = 680, rowHeight: CGFloat = 44, maxList: CGFloat = 460
+
+    var body: some View {
+        VStack(spacing: MT.Space.s8) {
+            field
+            results
+        }
+        .frame(width: Self.width)
+        .onAppear { focused = true }
+    }
+
+    private var field: some View {
+        HStack(spacing: MT.Space.s12) {
+            Image(systemName: "magnifyingglass").font(.system(size: 24, weight: .medium)).foregroundStyle(Color.mtInkMuted)
+            TextField("Search", text: $search.query)
+                .textFieldStyle(.plain).font(.system(size: 26)).foregroundStyle(Color.mtInk)
+                .autocorrectionDisabled().focused($focused)
+        }
+        .padding(.horizontal, MT.Space.s18)
+        .frame(height: 64)
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.section))
+    }
+
+    private var results: some View {
+        let sections = search.sections
+        // Where each section's rows start in the one list the arrow keys walk.
+        let starts = sections.indices.map { i in sections[..<i].reduce(0) { $0 + $1.items.count } }
+        return VStack(spacing: MT.Space.s4) {
+            tabs
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    // A plain VStack: a few dozen rows, and a lazy one inside a ScrollView has frozen before.
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(sections.enumerated()), id: \.element.id) { number, section in
+                            Text(section.title.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(1.5)
+                                .foregroundStyle(Color.mtInkMuted)
+                                .padding(.horizontal, MT.Space.s10).frame(height: 26, alignment: .bottomLeading)
+                            if search.scope == .screenshots {
+                                ScreenshotGrid(shots: section.items, model: search.screenshots, selection: search.selection,
+                                               open: open, dropped: dropped)
+                            } else {
+                                ForEach(Array(section.items.enumerated()), id: \.element.id) { offset, item in
+                                    row(item, selected: starts[number] + offset == search.selection)
+                                        .frame(height: Self.rowHeight)
+                                        .id(starts[number] + offset)
+                                }
+                            }
+                        }
+                        if let status {
+                            Text(status).font(.system(size: 13)).foregroundStyle(Color.mtInkMuted)
+                                .frame(maxWidth: .infinity).frame(height: Self.rowHeight)
+                        }
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                }
+                .frame(height: min(listHeight, Self.maxList))
+                .onChange(of: search.selection) { _, selection in proxy.scrollTo(selection) }   // keeps the selected row in view
+            }
+            Text(search.scope == .screenshots ? "Arrows Move  ·  Return Opens  ·  ⌘C Copies the Image  ·  Space Previews  ·  Drag Out to Share"
+                                              : "↑↓ Move  ·  Return Opens  ·  ⌘Return Shows in Finder  ·  Space Previews  ·  ⌘1 to ⌘4 Switch Tabs")
+                .font(.system(size: 10)).foregroundStyle(Color.mtInkMuted).lineLimit(1)
+                .frame(maxWidth: .infinity).frame(height: 20)
+        }
+        .padding(MT.Space.s8)
+        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.section))
+    }
+
+    /// All, Apps, Files, Downloads, Screenshots: the open one in the accent colour.
+    private var tabs: some View {
+        HStack(spacing: MT.Space.s4) {
+            ForEach(SearchScope.allCases, id: \.self) { scope in
+                let open = scope == search.scope
+                Text(scope.tab).font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(open ? Color.white : Color.mtInk)
+                    .padding(.horizontal, MT.Space.s12).frame(height: 28)
+                    .background(open ? Color.accentColor : Color.mtFillInset, in: .capsule)
+                    .contentShape(.capsule)
+                    .onTapGesture { search.scope = scope }
+                    .help(scope.shortcut.isEmpty ? "All" : "\(scope.tab) (\(scope.shortcut))")
+                    .accessibilityLabel(scope.tab)
+                    .accessibilityAddTraits(open ? [.isButton, .isSelected] : .isButton)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, MT.Space.s4).padding(.top, MT.Space.s4)
+    }
+
+    @ViewBuilder private func row(_ item: SearchItem, selected: Bool) -> some View {
+        switch item {
+        case .entry(let entry):
+            SearchRow(entry: entry, running: model.running[entry.id] != nil, selected: selected)
+                .overlay { RowMouse(url: entry.target, click: { open(item) }, dropped: dropped) }
+        case .file(let hit):
+            FileRow(hit: hit, words: FileRank.words(search.query), selected: selected)
+                .overlay { RowMouse(url: URL(fileURLWithPath: hit.path), click: { open(item) }, dropped: dropped) }
+        }
+    }
+
+    /// Why there is nothing (more) to show.
+    private var status: String? {
+        let typed = !FileRank.words(search.query).isEmpty
+        if search.scope == .files, !typed { return "Type a Name to Search Your Files" }
+        if search.scope == .screenshots, search.items.isEmpty {
+            return typed ? "No Matches" : "No Screenshots in " + FileRank.place(search.screenshots.folder, home: NSHomeDirectory())
+        }
+        if search.files == .searching { return "Searching Files…" }
+        if search.files == .failed { return "Spotlight Did Not Answer" }
+        guard search.items.isEmpty else { return nil }
+        return search.phase == .indexing ? "Indexing Apps…" : "No Matches"
+    }
+}
+
+/// The Screenshots tab: thumbnails, newest first, four to a row, each with how long ago it was taken. A click opens
+/// one, dragging carries the file out (a copy) and the selected one has an accent ring.
+struct ScreenshotGrid: View {
+    static let columns = 4
+    let shots: [SearchItem]
+    let model: ScreenshotsModel
+    let selection: Int
+    let open: (SearchItem) -> Void
+    let dropped: () -> Void
+    private static let cell = CGSize(width: 152, height: 96)
+
+    var body: some View {
+        let rows = stride(from: 0, to: shots.count, by: Self.columns).map { Array(shots.indices[$0..<min($0 + Self.columns, shots.count)]) }
+        VStack(alignment: .leading, spacing: MT.Space.s10) {
+            ForEach(rows, id: \.first) { row in
+                HStack(spacing: MT.Space.s8) {
+                    ForEach(row, id: \.self) { index in cell(index) }
+                }
+            }
+        }
+        .padding(.horizontal, MT.Space.s6).padding(.bottom, MT.Space.s6)
+    }
+
+    @ViewBuilder private func cell(_ index: Int) -> some View {
+        if case .file(let hit) = shots[index] {
+            let selected = index == selection
+            VStack(spacing: MT.Space.s4) {
+                Image(nsImage: model.thumbnail(hit, size: Self.cell)).resizable().interpolation(.high).scaledToFit()
+                .frame(width: Self.cell.width, height: Self.cell.height)
+                .background(Color.mtFillInset, in: .rect(cornerRadius: MT.Radius.control))
+                .clipShape(.rect(cornerRadius: MT.Radius.control))
+                .overlay {
+                    RoundedRectangle(cornerRadius: MT.Radius.control)
+                        .strokeBorder(selected ? Color.accentColor : Color.mtHairline, lineWidth: selected ? 3 : 1)
+                }
+                .overlay { RowMouse(url: URL(fileURLWithPath: hit.path), click: { open(shots[index]) }, dropped: dropped) }
+                Text(hit.date.map { $0.formatted(.relative(presentation: .named)) } ?? hit.name)
+                    .font(.system(size: 10)).foregroundStyle(selected ? Color.mtInk : Color.mtInkMuted).lineLimit(1)
+            }
+            .id(index)
+            .help(hit.name)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(hit.name)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        }
+    }
+}
+
+private struct SearchRow: View {
+    let entry: SearchEntry
+    let running: Bool
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: MT.Space.s10) {
+            Group {
+                switch entry.kind {
+                case .app: Image(nsImage: IconCache.icon(entry.target.path)).resizable()
+                case .setting: Image(nsImage: IconCache.icon(AppIndexer.systemSettings)).resizable()
+                case .link, .project: ProjectBadge(path: entry.projectPath, title: entry.name, host: entry.detail)
+                }
+            }
+            .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Color.mtInk).lineLimit(1)
+                if !entry.detail.isEmpty {
+                    Text(entry.detail).font(.system(size: 10)).foregroundStyle(Color.mtInkMuted).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 0)
+            if running {
+                Circle().fill(Color.mtGood).frame(width: 7, height: 7).help("Running").accessibilityLabel("Running")
+            }
+        }
+        .padding(.horizontal, MT.Space.s10)
+        .frame(maxHeight: .infinity)
+        .background(selected ? Color.mtFillHover : .clear, in: .rect(cornerRadius: MT.Radius.row))
+        .accessibilityLabel(entry.name)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A file or folder: its icon, its name with the typed part in bold, then where it is and when it was last used.
+private struct FileRow: View {
+    let hit: FileHit
+    let words: [String]
+    let selected: Bool
+
+    var body: some View {
+        let folder = FileRank.place((hit.path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
+        HStack(spacing: MT.Space.s10) {
+            Image(nsImage: IconCache.icon(hit.path)).resizable().frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 14)).foregroundStyle(Color.mtInk).lineLimit(1).truncationMode(.middle)
+                Text(hit.date.map { "\(folder)  ·  \(FileRank.when($0))" } ?? folder)
+                    .font(.system(size: 10)).foregroundStyle(Color.mtInkMuted).lineLimit(1).truncationMode(.head)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, MT.Space.s10)
+        .frame(maxHeight: .infinity)
+        .background(selected ? Color.mtFillHover : .clear, in: .rect(cornerRadius: MT.Radius.row))
+        .help(hit.path)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(hit.name), \(folder)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private var name: AttributedString {
+        var text = AttributedString(hit.name)
+        for range in FileRank.emphasis(hit.name, words) {
+            if let range = Range(range, in: text) { text[range].font = .system(size: 14, weight: .bold) }
+        }
+        return text
+    }
+}
+
+/// A search row's mouse, in AppKit: a click (down and up without moving) opens the row; press and drag carries
+/// its file or link out to another app, and never opens it. AppKit rather than .onDrag, because only a dragging
+/// source hears how the drag ended, and the popup closes after a drop that was taken.
+private struct RowMouse: NSViewRepresentable {
+    let url: URL
+    let click: () -> Void
+    let dropped: () -> Void
+
+    func makeNSView(context: Context) -> Source { Source() }
+
+    func updateNSView(_ view: Source, context: Context) {
+        view.url = url
+        view.click = click
+        view.dropped = dropped
+    }
+
+    final class Source: NSView, NSDraggingSource {
+        var url: URL?
+        var click: (() -> Void)?
+        var dropped: (() -> Void)?
+        private var pressed: NSPoint?   // where the button went down; nil once a drag has begun
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) { pressed = event.locationInWindow }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let from = pressed, let url, hypot(event.locationInWindow.x - from.x, event.locationInWindow.y - from.y) > 4 else { return }
+            pressed = nil
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let icon = url.isFileURL ? NSWorkspace.shared.icon(forFile: url.path) : NSImage(systemSymbolName: "link", accessibilityDescription: nil)
+            let at = convert(event.locationInWindow, from: nil)
+            item.setDraggingFrame(NSRect(x: at.x - 16, y: at.y - 16, width: 32, height: 32), contents: icon)
+            beginDraggingSession(with: [item], event: event, source: self)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if pressed != nil { click?() }
+            pressed = nil
+        }
+
+        /// Copy or link, never move: dragging a search result must not relocate the original. Not onto Pier itself,
+        /// whose bar would open it with an app or put it in the Trash.
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            context == .outsideApplication ? [.copy, .link, .generic] : []
+        }
+
+        func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+            if !operation.isEmpty { dropped?() }
+        }
+    }
+}
+
 struct LinksList: View {
     let kind: DockModel.LinkKind
     let model: DockModel
@@ -939,7 +1252,7 @@ struct LinksList: View {
         VStack(alignment: .leading, spacing: MT.Space.s8) {
             // Plain rows, not a List: a List's reordering is system drag-and-drop, which never lands in
             // Pier's panels, and it swallows clicks meant for the text fields.
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
                     ForEach($draft) { $row in
                         HStack(spacing: MT.Space.s6) {
@@ -1137,107 +1450,6 @@ enum LocalServers {
         return withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
         }
-    }
-}
-
-/// Hovering Now Playing: the artwork, where the song is, and glass controls.
-struct NowPlayingCard: View {
-    let nowPlaying: NowPlaying
-    let controller: DockController
-    @State private var details: NowPlaying.Details?
-    @State private var fetchedAt = Date()
-
-    var body: some View {
-        let item = nowPlaying.item
-        VStack(spacing: MT.Space.s12) {
-            HStack(spacing: MT.Space.s12) {
-                Group {
-                    if let art = details?.artwork {
-                        Image(nsImage: art).resizable().scaledToFill()
-                    } else {
-                        Image(nsImage: IconCache.icon(NSWorkspace.shared.urlForApplication(withBundleIdentifier: item?.bundleID ?? "")?.path ?? ""))
-                            .resizable().padding(MT.Space.s8)
-                    }
-                }
-                .frame(width: 64, height: 64)
-                .clipShape(.rect(cornerRadius: MT.Radius.control, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item?.title ?? "").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.mtInk)
-                    Text(item?.subtitle ?? "").font(.system(size: 12)).foregroundStyle(Color.mtInkMuted)
-                }
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let details, details.duration > 0 {
-                // Ticks along on its own while playing; read once when the card opens.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let elapsed = item?.playing == true ? context.date.timeIntervalSince(fetchedAt) : 0
-                    let position = min(details.position + elapsed, details.duration)
-                    VStack(spacing: 4) {
-                        GeometryReader { geo in
-                            Capsule().fill(Color.mtRingTrack)
-                                .overlay(alignment: .leading) {
-                                    Capsule().fill(Color.mtInk.opacity(0.7)).frame(width: geo.size.width * position / details.duration)
-                                }
-                        }
-                        .frame(height: 4)
-                        HStack {
-                            Text(Self.time(position))
-                            Spacer()
-                            Text("-" + Self.time(details.duration - position))
-                        }
-                        .font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(Color.mtInkMuted)
-                    }
-                }
-            }
-            HStack(spacing: MT.Space.s18) {
-                control("backward.fill", size: 14, label: "Previous") { nowPlaying.previous(); reload() }
-                control(item?.playing == true ? "pause.fill" : "play.fill", size: 20, label: item?.playing == true ? "Pause" : "Play") {
-                    nowPlaying.playPause()
-                    reload()
-                }
-                control("forward.fill", size: 14, label: "Next") { nowPlaying.next(); reload() }
-            }
-            Button("Open \(item.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).first?.localizedName } ?? "Player")") {
-                controller.closeCard()
-                nowPlaying.reveal()
-            }
-            .buttonStyle(.glass).controlSize(.small)
-        }
-        .padding(MT.Space.s12)
-        .frame(width: 280)
-        .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
-        .onHover { controller.cardHover($0) }
-        .task { await load() }
-    }
-
-    private func control(_ symbol: String, size: CGFloat, label: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: size, weight: .semibold))
-                .frame(width: size * 2.4, height: size * 2.4)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.mtInk)
-        .glassEffect(.regular.interactive(), in: .circle)
-        .accessibilityLabel(label)
-    }
-
-    private func load() async {
-        details = await nowPlaying.details()
-        fetchedAt = Date()
-    }
-
-    /// After a skip the song changed; read it again once the player has caught up.
-    private func reload() {
-        Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            await load()
-        }
-    }
-
-    private static func time(_ seconds: Double) -> String {
-        let s = max(0, Int(seconds.rounded()))
-        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 

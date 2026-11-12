@@ -6,13 +6,13 @@ import MacToolsKit
 final class DockController {
     let model = DockModel()
     let downloads = DownloadsModel()
-    let nowPlaying = NowPlaying()
     let reorder = Reorder()
     let tabs = TabGroups()
     let minimized = MinimizedWindows()
     private lazy var clearance = DockClearance { [weak self] in
         guard let self, self.panel.isVisible, let screen = self.screen else { return nil }
-        return (self.panel.frame.maxY, screen)
+        let edge = self.model.edge
+        return (edge, edge == .bottom ? self.panel.frame.maxY : self.panel.frame.minX, screen)
     }
     let sendBox = SendBox()
     var trashFrame: CGRect = .zero
@@ -24,6 +24,7 @@ final class DockController {
     private let hosting = FirstClickHostingView(rootView: AnyView(EmptyView()))
     private let downloadsPopup = Popup(interactive: true)   // Downloads or the open-apps grid
     enum Grid { case downloads, openApps, macTools, links, projectLinks }
+    private(set) lazy var searchPanel = SearchPanelController(model: model, downloads: downloads)
     private var grid: Grid?
     private let hoverPopup = Popup(interactive: false)
     private var size: CGSize = .zero
@@ -39,8 +40,7 @@ final class DockController {
 
     init() {
         hosting.sizingOptions = []
-        // Clear headroom above the glass, so a bouncing or hovered icon isn't clipped by the window edge.
-        hosting.rootView = AnyView(DockView(controller: self).fixedSize().padding(.top, 12)
+        hosting.rootView = AnyView(DockView(controller: self)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] in self?.fit($0) })
         panel.contentView = hosting
         hosting.acceptDrops()
@@ -50,6 +50,8 @@ final class DockController {
         tabs.start()
         minimized.start()
         clearance.start()
+        _ = searchPanel   // indexes the installed apps now, not on the first search
+        SearchHotkey.register { [weak self] in self?.toggleSearch() }
         // Right-clicking an app: its own Dock menu items plus Pier's. Elsewhere on the bar, Pier's menu.
         hosting.rightClick = { [weak self] point in
             guard let self, let item = self.item(at: point) else { return nil }
@@ -76,20 +78,37 @@ final class DockController {
         fit(size)
     }
 
-    /// Bottom centre of the chosen display, 6pt above the edge. Too wide for the screen,
-    /// or narrower than it needs to be after an app quits: resize the tiles, which lays out again
-    /// and lands back here.
+    /// Bottom or Right (Position in the bar's menu). The new layout reports its size, which lands in `fit`.
+    func setEdge(_ edge: DockEdge) {
+        guard edge != model.edge else { return }
+        closeCard()
+        downloadsPopup.close()
+        UserDefaults.standard.set(edge.rawValue, forKey: "edge")
+        model.tileSize = DockModel.maxTile   // re-fit for the new length
+        model.edge = edge
+    }
+
+    /// Bottom centre of the chosen display, 6pt above the edge; or the middle of its right edge, 6pt in,
+    /// below the menu bar. Too long for the screen, or shorter than it needs to be after an app quits:
+    /// resize the tiles, which lays out again and lands back here.
     private func fit(_ newSize: CGSize) {
         guard newSize.width > 0, let screen else { return }
-        let room = screen.frame.width - 2 * MT.Space.s8
+        let edge = model.edge
+        var area = screen.frame
+        if edge == .right { area.size.height = screen.visibleFrame.maxY - area.minY }   // not under the menu bar
+        let room = edge.along(area.size) - 2 * MT.Space.s8
+        let length = edge.along(newSize)
         let tile = model.tileSize
-        let wanted = min(DockModel.maxTile, max(DockModel.minTile, (tile * room / newSize.width).rounded(.down)))
-        if (newSize.width > room && wanted < tile) || (newSize.width < room && wanted > tile) {
+        let wanted = min(DockModel.maxTile, max(DockModel.minTile, (tile * room / length).rounded(.down)))
+        if (length > room && wanted < tile) || (length < room && wanted > tile) {
             model.tileSize = wanted
         }
         size = newSize
-        panel.setFrame(NSRect(x: (screen.frame.midX - newSize.width / 2).rounded(), y: screen.frame.minY + 6,
-                              width: newSize.width, height: newSize.height), display: true)
+        let origin = switch edge {
+        case .bottom: CGPoint(x: (area.midX - newSize.width / 2).rounded(), y: area.minY + 6)
+        case .right: CGPoint(x: area.maxX - 6 - newSize.width, y: (area.midY - newSize.height / 2).rounded())
+        }
+        panel.setFrame(NSRect(origin: origin, size: newSize), display: true)
     }
 
     /// A SwiftUI `.global` frame inside the bar, in screen coordinates.
@@ -122,24 +141,6 @@ final class DockController {
         }
     }
 
-    /// Hovering Now Playing: artwork, progress and glass controls.
-    func nowPlayingHover(_ inside: Bool, frame: CGRect) {
-        hoverTask?.cancel()
-        let id = "nowPlaying"
-        if inside {
-            hoveredID = id
-            guard !downloadsPopup.isVisible else { return }
-            hoverTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled, let self, self.hoveredID == id else { return }
-                self.hoverPopup.show(NowPlayingCard(nowPlaying: self.nowPlaying, controller: self), above: self.screenRect(frame))
-            }
-        } else {
-            if hoveredID == id { hoveredID = nil }
-            scheduleCardClose()
-        }
-    }
-
     /// Hovering the MEM ring: which apps are using the memory.
     func memoryHover(_ inside: Bool, frame: CGRect) {
         hoverTask?.cancel()
@@ -150,7 +151,7 @@ final class DockController {
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self, self.hoveredID == id else { return }
-                self.hoverPopup.show(MemoryCard(model: self.model, controller: self), above: self.screenRect(frame))
+                self.hoverPopup.show(MemoryCard(model: self.model, controller: self), from: self.screenRect(frame), edge: self.model.edge)
             }
         } else {
             if hoveredID == id { hoveredID = nil }
@@ -162,7 +163,7 @@ final class DockController {
         let app = model.running[item.id]
         let previews = WindowPreviews()
         if let app { Task { await previews.load(pid: app.processIdentifier) } }
-        hoverPopup.show(HoverCard(item: item, app: app, previews: previews, controller: self), above: anchor)
+        hoverPopup.show(HoverCard(item: item, app: app, previews: previews, controller: self), from: anchor, edge: model.edge)
     }
 
     func cardHover(_ inside: Bool) {
@@ -279,14 +280,16 @@ final class DockController {
         closeCard()
         reorder.dragging = item.id
         reorder.offset = drag.translation
-        reorder.removing = model.isPinned(item) && drag.translation.height < -60
+        let edge = model.edge
+        reorder.removing = model.isPinned(item) && edge.across(drag.translation) < -60   // away from the screen edge
         guard !reorder.removing else { reorder.target = nil; return }
-        // Nearest pinned tile (or Finder) to the pointer; its left or right half says before or after.
+        // Nearest pinned tile (or Finder) to the pointer, along the bar; which half says before or after.
+        let at = edge.along(drag.location)
         let targets = (model.groups.flatMap { $0 } + [model.finder]).filter { $0 != item }
-        let nearest = targets.compactMap { t in tileFrames[t.id].map { (t, $0) } }
-            .min { abs($0.1.midX - drag.location.x) < abs($1.1.midX - drag.location.x) }
-        if let (target, frame) = nearest, abs(frame.midX - drag.location.x) < frame.width * 1.5 {
-            reorder.target = (target.id, target != model.finder && drag.location.x > frame.midX)
+        let nearest = targets.compactMap { t in tileFrames[t.id].map { (t, edge.along(CGPoint(x: $0.midX, y: $0.midY)), $0) } }
+            .min { abs($0.1 - at) < abs($1.1 - at) }
+        if let (target, mid, frame) = nearest, abs(mid - at) < edge.along(frame.size) * 1.5 {
+            reorder.target = (target.id, target != model.finder && at > mid)
         } else {
             reorder.target = nil
         }
@@ -319,7 +322,7 @@ final class DockController {
         case .downloads:
             downloads.refresh()
             let box = sendBox
-            downloadsPopup.show(DownloadsGrid(model: downloads, sendBox: box, close: close), above: screenRect(frame),
+            downloadsPopup.show(DownloadsGrid(model: downloads, sendBox: box, close: close), from: screenRect(frame), edge: model.edge,
                                 drop: .init(over: { point in
                                     box.targeted = point.map { box.frame.contains($0) } ?? false
                                     return box.targeted
@@ -329,15 +332,27 @@ final class DockController {
                                     return true
                                 }))
         case .openApps:
-            downloadsPopup.show(OpenAppsGrid(model: model, close: close), above: screenRect(frame))
+            downloadsPopup.show(OpenAppsGrid(model: model, close: close), from: screenRect(frame), edge: model.edge)
         case .macTools:
             downloadsPopup.show(OpenAppsGrid(model: model, title: "MAC TOOLS", items: DockModel.macTools(), close: close),
-                                above: screenRect(frame))
+                                from: screenRect(frame), edge: model.edge)
         case .links:
-            downloadsPopup.show(LinksList(kind: .quick, model: model, controller: self, close: close), above: screenRect(frame))
+            downloadsPopup.show(LinksList(kind: .quick, model: model, controller: self, close: close), from: screenRect(frame), edge: model.edge)
         case .projectLinks:
-            downloadsPopup.show(LinksList(kind: .projects, model: model, controller: self, close: close), above: screenRect(frame))
+            downloadsPopup.show(LinksList(kind: .projects, model: model, controller: self, close: close), from: screenRect(frame), edge: model.edge)
         }
+    }
+
+    // MARK: Search
+
+    /// The Search tile, Option-Space and Command-Space. A grid that is open goes, and the app you were in before
+    /// it is the one Search hands the keyboard back to.
+    func toggleSearch() {
+        closeCard()
+        let previous = downloadsPopup.previous
+        downloadsPopup.close(restoreFocus: false)
+        searchPanel.toggle()
+        if searchPanel.popup.previous == nil { searchPanel.popup.previous = previous }
     }
 
     // MARK: Pier

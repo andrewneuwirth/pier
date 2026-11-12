@@ -1,6 +1,25 @@
 import AppKit
 import MacToolsKit
 
+// Pure-logic checks (the family's stand-in for a test target): nothing is started, the Dock is untouched.
+if CommandLine.arguments.contains("--self-check") {
+    SearchRank.selfCheck()
+    FileRank.selfCheck()
+    MainActor.assumeIsolated { ScreenshotsModel.selfCheck() }
+    print("self-check ok")
+    exit(0)
+}
+
+// The search panel for real: opens it, drives it with key events sent to Pier only, saves two pictures, quits.
+if let flag = CommandLine.arguments.firstIndex(of: "--ui-check") {
+    let folder = CommandLine.arguments.dropFirst(flag + 1).first ?? FileManager.default.currentDirectoryPath
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        SearchPanelController.uiCheck(shots: folder)
+        NSApplication.shared.run()
+    }
+}
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

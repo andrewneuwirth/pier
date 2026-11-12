@@ -24,8 +24,6 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Pier asks Music, Spotify and your browsers what is playing, so Now Playing can show it and take you to the tab.</string>
     <key>NSDownloadsFolderUsageDescription</key>
     <string>Pier shows your newest downloads in the Downloads grid.</string>
 </dict>
