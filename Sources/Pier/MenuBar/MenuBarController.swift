@@ -2,10 +2,10 @@ import AppKit
 import MacToolsKit
 import SwiftUI
 
-/// Two status items: the visible Tuck button, and an invisible divider to its
-/// left. While hiding, the divider grows to 10,000 pt, which pushes every icon
-/// left of it off the screen. ⌘-drag icons across the divider to choose.
-final class AppController: NSObject, NSApplicationDelegate {
+/// Pier's menu bar button (moved from Tuck). Two status items: the visible button, and an
+/// invisible divider to its left. While hiding, the divider grows to 10,000 pt, which pushes
+/// every icon left of it off the screen. ⌘-drag icons across the divider to choose.
+final class MenuBarController: NSObject {
     private var button: NSStatusItem!
     private var divider: NSStatusItem!
     private var spacer: NSStatusItem?   // macOS 27 only: a second invisible item left of the divider, for bars without a notch
@@ -20,6 +20,12 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var placingSpacer = false
     private let shownLength: CGFloat = 14
     private var anchor = NSPoint.zero   // where the button was clicked; the panel hangs below it
+    private let onQuit: () -> Void
+
+    init(onQuit: @escaping () -> Void) {
+        self.onQuit = onQuit
+        super.init()
+    }
 
     /// macOS 27 draws the whole menu bar in one window and moves items that don't fit into
     /// its own overflow (behind a « chevron), and drops a 10,000 pt item from the bar entirely.
@@ -27,24 +33,24 @@ final class AppController: NSObject, NSApplicationDelegate {
         OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0))
 
     private var hiding: Bool {
-        get { !UserDefaults.standard.bool(forKey: "showAll") }
-        set { UserDefaults.standard.set(!newValue, forKey: "showAll") }
+        get { !UserDefaults.standard.bool(forKey: "menuBarShowAll") }
+        set { UserDefaults.standard.set(!newValue, forKey: "menuBarShowAll") }
     }
 
-    func applicationDidFinishLaunching(_ note: Notification) {
+    func start() {
         // First run: put the button rightmost and the divider just left of it.
         let d = UserDefaults.standard
-        if d.object(forKey: "NSStatusItem Preferred Position tuck.button") == nil {
-            d.set(0, forKey: "NSStatusItem Preferred Position tuck.button")
-            d.set(1, forKey: "NSStatusItem Preferred Position tuck.divider")
+        if d.object(forKey: "NSStatusItem Preferred Position pier.menubar") == nil {
+            d.set(0, forKey: "NSStatusItem Preferred Position pier.menubar")
+            d.set(1, forKey: "NSStatusItem Preferred Position pier.divider")
         }
 
         button = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        button.autosaveName = "tuck.button"
+        button.autosaveName = "pier.menubar"
         button.behavior = []
         if let b = button.button {
             let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-            b.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Tuck")?
+            b.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Pier")?
                 .withSymbolConfiguration(cfg)
             b.image?.isTemplate = true
             b.target = self
@@ -53,11 +59,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         divider = NSStatusBar.system.statusItem(withLength: shownLength)
-        divider.autosaveName = "tuck.divider"
+        divider.autosaveName = "pier.divider"
         divider.behavior = []
         if let b = divider.button {
             let cfg = NSImage.SymbolConfiguration(pointSize: 4, weight: .regular)
-            b.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Tuck divider")?
+            b.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Pier divider")?
                 .withSymbolConfiguration(cfg)
             b.image?.isTemplate = true
             b.appearsDisabled = true
@@ -78,8 +84,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
             self?.closePanel()
         }
-
-        _ = BarItems.trusted(prompt: true)
+        // Accessibility: Pier's own grant (asked for at launch by DockBadges); the list offers the setting if missing.
     }
 
     // MARK: Hiding
@@ -100,12 +105,12 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// right of the divider, not on the active app, so there is nothing to redo on app or Space changes.
     private func fitHiddenLength(placeSpacer: Bool = true) {
         guard !placingSpacer else { return }
-        divider.length = shownLength   // measure with the divider back in the bar, beside Tuck
+        divider.length = shownLength   // measure with the divider back in the bar, beside the button
         spacer?.length = 0
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {   // Tuck answers its own AX on main
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {   // Pier answers its own AX on main
             // AX reports these on whichever bar is active, so only distances from that screen's edge are used.
-            let tuck = BarItems.ownItemFrame("Tuck"), div = BarItems.ownItemFrame("Tuck divider")
-            let spacer = BarItems.ownItemFrame("Tuck spacer")
+            let tuck = BarItems.ownItemFrame("Pier"), div = BarItems.ownItemFrame("Pier divider")
+            let spacer = BarItems.ownItemFrame("Pier spacer")
             DispatchQueue.main.async {
                 if placeSpacer, let tuck, let div, div.minX < tuck.minX,
                    !(spacer.map { $0.maxX <= div.minX && div.minX - $0.maxX < 20 } ?? false) {   // not right beside the divider
@@ -115,7 +120,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 }
                 self.hiddenLength = self.shownLength
                 self.spacerLength = 0
-                if let tuck, let div, div.minX < tuck.minX,   // divider right of Tuck would tuck Tuck itself
+                if let tuck, let div, div.minX < tuck.minX,   // divider right of the button would tuck the button itself
                    let screen = NSScreen.screens.first(where: { $0.frame.minX <= tuck.midX && tuck.midX < $0.frame.maxX }) {
                     let right = screen.frame.maxX - div.maxX   // everything right of the divider
                     let notch = NSScreen.screens.compactMap(\.auxiliaryTopRightArea).map(\.width).max()
@@ -133,24 +138,24 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func makeSpacer() {
         let s = NSStatusBar.system.statusItem(withLength: 0)
-        s.autosaveName = "tuck.spacer"
+        s.autosaveName = "pier.spacer"
         s.behavior = []
         s.isVisible = true
-        s.button?.setAccessibilityLabel("Tuck spacer")
+        s.button?.setAccessibilityLabel("Pier spacer")
         spacer = s
     }
 
-    /// macOS 27 keeps ⌘-dragged positions in a plist Tuck can't read, so the divider's position is
+    /// macOS 27 keeps ⌘-dragged positions in a plist Pier can't read, so the divider's position is
     /// unknown; binary-search the spacer's preferred position (points from the right edge, larger
     /// is further left) for the smallest one that lands left of the divider, i.e. right beside it.
     private func placeSpacer(_ lo: Double = 0, _ hi: Double = 4096, done: @escaping () -> Void) {
         let mid = hi - lo > 0.5 ? (lo + hi) / 2 : hi
         if let old = spacer { NSStatusBar.system.removeStatusItem(old); spacer = nil }   // its dealloc clears the saved position
-        UserDefaults.standard.set(mid, forKey: "NSStatusItem Preferred Position tuck.spacer")
+        UserDefaults.standard.set(mid, forKey: "NSStatusItem Preferred Position pier.spacer")
         makeSpacer()
         guard hi - lo > 0.5 else { done(); return }
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) {
-            let s = BarItems.ownItemFrame("Tuck spacer"), d = BarItems.ownItemFrame("Tuck divider")
+            let s = BarItems.ownItemFrame("Pier spacer"), d = BarItems.ownItemFrame("Pier divider")
             let left = s != nil && d != nil && s!.minX < d!.minX
             DispatchQueue.main.async { left ? self.placeSpacer(lo, mid, done: done) : self.placeSpacer(mid, hi, done: done) }
         }
@@ -188,7 +193,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         login.target = self
         menu.addItem(login)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Tuck", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let quit = NSMenuItem(title: "Quit Pier", action: #selector(quitPier), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
         button.menu = menu
         button.button?.performClick(nil)
         button.menu = nil
@@ -199,6 +206,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         applyHiding()
         if systemOverflow && hiding { fitHiddenLength() }   // the divider may have been ⌘-dragged
     }
+
+    @objc private func quitPier() { onQuit() }   // restores the macOS Dock, like the bar's Quit Pier
 
     @objc private func toggleLogin() {
         LoginItem.set(!LoginItem.isEnabled)

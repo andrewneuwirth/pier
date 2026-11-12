@@ -36,18 +36,10 @@ struct GroupsFile: Codable {
     var myNumber: String?
     /// Quick Links, in order. (Perch's favorites were copied in when it was retired.)
     var links: [Link]?
-    /// The Projects list: sites and local servers of your own projects, with their real icons.
+    /// Old home of the Projects list; moved once into the shared ProjectLinks.file (see reloadGroups).
     var projectLinks: [Link]?
-    struct Link: Codable, Equatable, Identifiable {
-        var title: String
-        var url: String
-        /// The project folder, under ~/Developer, whose icon this link shows (Projects lists only).
-        var path: String?
-        /// For a server on this Mac: the shell command that starts it, run in that folder (Projects'
-        /// own launch command). Without one, the row shows status only.
-        var start: String?
-        var id: String { url }
-    }
+    /// title, url, and for project links the folder (`path`) and the command that starts its server (`start`).
+    typealias Link = ProjectLink
 
     static let folder = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Pier")
@@ -96,8 +88,7 @@ final class DockModel {
     func links(_ kind: LinkKind) -> [GroupsFile.Link] { kind == .quick ? links : projectLinks }
 
     private func store(_ list: [GroupsFile.Link], _ kind: LinkKind) {
-        if kind == .quick { file.links = list } else { file.projectLinks = list }
-        file.save()
+        if kind == .quick { file.links = list; file.save() } else { ProjectLinks.save(list) }   // the watcher reloads
     }
     private(set) var running: [String: NSRunningApplication] = [:]   // by AppItem.id
     /// Open, unpinned, not hidden: the 4 used most recently get tiles; the rest sit behind "+N".
@@ -130,13 +121,15 @@ final class DockModel {
     @ObservationIgnored private var lastUsed: [String: Date] = [:]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var timers: [Timer] = []
-    @ObservationIgnored private var groupsWatch: DispatchSourceFileSystemObject?
+    @ObservationIgnored private var groupsWatch: [DispatchSourceFileSystemObject] = []
     @ObservationIgnored private var lastStatus: [pid_t: String] = [:]
+    @ObservationIgnored private let usagePoller = UsagePoller()
 
     init() {
         reloadGroups()
         refreshStats()
         usage = UsageSnapshot.read()
+        usagePoller.onChange = { [weak self] in self?.usage = UsageSnapshot.read() }
         refreshBadges()
 
         let ws = NSWorkspace.shared.notificationCenter
@@ -185,8 +178,14 @@ final class DockModel {
 
     func reloadGroups() {
         file = GroupsFile.load()
+        // The Projects list is shared with the Projects app now: move it out of groups.json once.
+        if let old = file.projectLinks {
+            if !FileManager.default.fileExists(atPath: ProjectLinks.file.path) { ProjectLinks.save(old) }
+            file.projectLinks = nil
+            file.save()
+        }
         if links != file.links ?? [] { links = file.links ?? [] }
-        if projectLinks != file.projectLinks ?? [] { projectLinks = file.projectLinks ?? [] }
+        if let shared = ProjectLinks.load(), shared != projectLinks { projectLinks = shared }   // unreadable: keep the last good list
         let loaded = file.groups.map { ($0.name, $0.apps.compactMap(AppItem.init(path:))) }.filter { !$0.1.isEmpty }
         groups = loaded.map(\.1)
         groupNames = file.groups.map(\.name)
@@ -338,15 +337,20 @@ final class DockModel {
         }
     }
 
+    /// groups.json's folder and the shared Projects list's folder (the Projects app writes it too).
     private func watchGroupsFolder() {
-        let fd = Darwin.open(GroupsFile.folder.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        // Watch the folder, not the file: editors save by replacing the file.
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
-        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.reloadGroups() } }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-        groupsWatch = source
+        let projects = ProjectLinks.file.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        groupsWatch = [GroupsFile.folder, projects].compactMap { folder in
+            let fd = Darwin.open(folder.path, O_EVTONLY)
+            guard fd >= 0 else { return nil }
+            // Watch the folder, not the file: editors save by replacing the file.
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+            source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.reloadGroups() } }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            return source
+        }
     }
 
     // MARK: Badges
@@ -397,7 +401,7 @@ final class DockModel {
 
     private func tick() {
         refreshStats()
-        let fresh = UsageSnapshot.read()   // Usage Rings itself polls every 5 min
+        let fresh = UsageSnapshot.read()   // UsagePoller fetches every 5 min; this only picks up the file
         if fresh != usage { usage = fresh }   // setting an equal value would still redraw
     }
 

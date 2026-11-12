@@ -31,6 +31,7 @@ MainActor.assumeIsolated {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dock: DockController?
+    private var menuBar: MenuBarController?
 
     /// Parked tab windows are off screen; put every one back before Pier goes.
     func applicationWillTerminate(_ notification: Notification) {
@@ -53,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DockBadges.requestAccessOnce()   // unread badges and raising one exact window
         dock = DockController()
+        menuBar = MenuBarController { [weak self] in self?.dock?.quit() }
+        menuBar?.start()
     }
 }
 

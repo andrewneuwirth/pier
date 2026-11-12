@@ -19,7 +19,7 @@ enum BarItems {
         return AXIsProcessTrustedWithOptions([key: prompt] as CFDictionary)
     }
 
-    /// Every menu bar extra of every running app except Tuck, left to right.
+    /// Every menu bar extra of every running app except Pier, left to right.
     /// `dividerX` is the divider's midpoint; items left of it are hidden. On macOS 27
     /// pass nil: the system's own overflow decides what is hidden.
     static func all(dividerX: CGFloat?) -> [BarItem] {
@@ -65,7 +65,7 @@ enum BarItems {
         return out.sorted { $0.frame.minX < $1.frame.minX }
     }
 
-    /// Frame of one of Tuck's own status items, by accessibility description.
+    /// Frame of one of Pier's own status items, by accessibility description.
     /// Call off the main thread. (On macOS 27 the items' window frames are meaningless.)
     static func ownItemFrame(_ description: String) -> CGRect? {
         let axApp = AXUIElementCreateApplication(getpid())

@@ -8,7 +8,7 @@ enum Fetch {
     static func json(_ url: URL, headers: [String: String]) async throws -> [String: Any] {
         var request = URLRequest(url: url, timeoutInterval: 15)
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
-        request.setValue("UsageRings", forHTTPHeaderField: "User-Agent")
+        request.setValue("Pier", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw Failure.status(http.statusCode)
@@ -90,11 +90,11 @@ enum ClaudeSource {
         }
     }
 
-    private static func window(_ raw: Any?) -> Window? {
+    private static func window(_ raw: Any?) -> UsageWindow? {
         guard let dictionary = raw as? [String: Any],
               let utilization = dictionary["utilization"] as? Double
         else { return nil }
-        return Window(percent: utilization, resetsAt: Fetch.date(iso: dictionary["resets_at"]))
+        return UsageWindow(percent: utilization, resetsAt: Fetch.date(iso: dictionary["resets_at"]))
     }
 }
 
@@ -145,11 +145,11 @@ enum ChatGPTSource {
         return seconds > 0 && seconds <= 12 * 3600
     }
 
-    private static func window(_ raw: [String: Any]) -> Window? {
+    private static func window(_ raw: [String: Any]) -> UsageWindow? {
         guard let used = raw["used_percent"] as? Double
             ?? (raw["used_percent"] as? Int).map(Double.init)
         else { return nil }
-        return Window(percent: used, resetsAt: Fetch.date(epoch: raw["reset_at"]))
+        return UsageWindow(percent: used, resetsAt: Fetch.date(epoch: raw["reset_at"]))
     }
 }
 

@@ -368,8 +368,9 @@ private struct StatsCluster: View {
             if let s = r.short { detail += "\nSession: \(Int(s.percent.rounded()))% used" }
             if let l = r.long { detail += "\nWeek: \(Int(l.percent.rounded()))% used" }
             if r.stale { detail += "\nShowing the last reading" }
+            if r.failed, let note = r.note { detail += "\n\(note)" }
         } else {
-            detail += "\nNo reading. Open Usage Rings to start tracking."
+            detail += "\nNo reading yet."
         }
         return MiniRing(percent: reading?.primary?.percent, secondary: reading?.secondary?.percent,
                         label: name == "ChatGPT" ? "GPT" : name.uppercased(), base: tint, detail: detail)

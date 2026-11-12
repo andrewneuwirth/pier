@@ -42,7 +42,7 @@ struct TrayView: View {
 
     private var permission: some View {
         VStack(alignment: .leading, spacing: MT.Space.s8) {
-            Text("Tuck needs Accessibility access to see and open menu bar icons.")
+            Text("Pier needs Accessibility access to see and open menu bar icons.")
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)
             Button("Open Accessibility Settings") { model.onGrant() }
@@ -91,7 +91,7 @@ private struct Row: View {
     }
 }
 
-/// Borderless glass panel that can take Esc without activating Tuck.
+/// Borderless glass panel that can take Esc without activating Pier.
 final class TrayPanel: NSPanel {
     var onEscape: () -> Void = {}
 
