@@ -8,6 +8,7 @@ import SwiftUI
 final class AppController: NSObject, NSApplicationDelegate {
     private var button: NSStatusItem!
     private var divider: NSStatusItem!
+    private var spacer: NSStatusItem?   // macOS 27 only: a second invisible item left of the divider, for bars without a notch
     private let panel = TrayPanel()
     private let model = TrayModel()
     private lazy var hosting = NSHostingController(rootView: TrayView(model: model))
@@ -15,6 +16,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var rehideTimer: Timer?
 
     private lazy var hiddenLength: CGFloat = systemOverflow ? shownLength : 10_000   // macOS 27: see fitHiddenLength
+    private var spacerLength: CGFloat = 0
+    private var placingSpacer = false
     private let shownLength: CGFloat = 14
     private var anchor = NSPoint.zero   // where the button was clicked; the panel hangs below it
 
@@ -59,6 +62,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             b.image?.isTemplate = true
             b.appearsDisabled = true
         }
+        if systemOverflow { makeSpacer() }
         applyHiding()
         if systemOverflow {
             fitHiddenLength()
@@ -84,26 +88,71 @@ final class AppController: NSObject, NSApplicationDelegate {
         divider.length = hiding ? hiddenLength : shownLength
         divider.button?.image?.isTemplate = true
         divider.button?.alphaValue = hiding ? 0 : 1
+        spacer?.length = hiding ? spacerLength : 0
     }
 
-    /// macOS 27: the divider fills the gap between the notch and the button. That's too wide
-    /// to fit beside the other icons, so the divider and everything left of it go into the
-    /// system overflow, yet narrow enough that macOS keeps it in the bar instead of dropping it.
-    /// Without a notch there is no such width, so hiding is left to macOS.
-    private func fitHiddenLength() {
+    /// macOS 27 gives every display its own bar and moves the items that don't fit, plus everything
+    /// left of them, behind the « chevron. An item wider than about half its display is dropped
+    /// instead, and from about 600 pt the « itself goes. One length can't do both bars: the notch bar
+    /// needs ~450-600 pt, a 1920 pt external bar ~950. So the divider is sized to just overflow the
+    /// notch bar, and the spacer left of it, too long to fit beside the divider on any bar, catches
+    /// the wider bars where the divider still fits. Both depend only on the screens and the icons
+    /// right of the divider, not on the active app, so there is nothing to redo on app or Space changes.
+    private func fitHiddenLength(placeSpacer: Bool = true) {
+        guard !placingSpacer else { return }
         divider.length = shownLength   // measure with the divider back in the bar, beside Tuck
+        spacer?.length = 0
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {   // Tuck answers its own AX on main
+            // AX reports these on whichever bar is active, so only distances from that screen's edge are used.
             let tuck = BarItems.ownItemFrame("Tuck"), div = BarItems.ownItemFrame("Tuck divider")
+            let spacer = BarItems.ownItemFrame("Tuck spacer")
             DispatchQueue.main.async {
-                var length = self.shownLength
-                if let tuck, let div, div.minX < tuck.minX,   // divider right of Tuck would tuck Tuck itself
-                   let notch = NSScreen.screens.first(where: { $0.frame.minX <= tuck.midX && tuck.midX < $0.frame.maxX })?
-                       .auxiliaryTopRightArea {
-                    length = max(tuck.minX - notch.minX, self.shownLength)
+                if placeSpacer, let tuck, let div, div.minX < tuck.minX,
+                   !(spacer.map { $0.maxX <= div.minX && div.minX - $0.maxX < 20 } ?? false) {   // not right beside the divider
+                    self.placingSpacer = true
+                    self.placeSpacer { self.placingSpacer = false; self.fitHiddenLength(placeSpacer: false) }
+                    return
                 }
-                self.hiddenLength = length
+                self.hiddenLength = self.shownLength
+                self.spacerLength = 0
+                if let tuck, let div, div.minX < tuck.minX,   // divider right of Tuck would tuck Tuck itself
+                   let screen = NSScreen.screens.first(where: { $0.frame.minX <= tuck.midX && tuck.midX < $0.frame.maxX }) {
+                    let right = screen.frame.maxX - div.maxX   // everything right of the divider
+                    let notch = NSScreen.screens.compactMap(\.auxiliaryTopRightArea).map(\.width).max()
+                    // shortcut: 100 pt margin covers the mic/camera indicator coming and going; measure it if that proves too little.
+                    self.hiddenLength = notch.map { $0 - right + 100 } ?? 500
+                    // shortcut: two items cover bars up to ~2000 pt wide; an ultrawide would need a third.
+                    if let spacer, spacer.minX < div.minX {   // same reason as the divider check
+                        self.spacerLength = NSScreen.screens.map { $0.frame.width / 2 - 70 }.max() ?? 0
+                    }
+                }
                 self.applyHiding()
             }
+        }
+    }
+
+    private func makeSpacer() {
+        let s = NSStatusBar.system.statusItem(withLength: 0)
+        s.autosaveName = "tuck.spacer"
+        s.behavior = []
+        s.isVisible = true
+        s.button?.setAccessibilityLabel("Tuck spacer")
+        spacer = s
+    }
+
+    /// macOS 27 keeps ⌘-dragged positions in a plist Tuck can't read, so the divider's position is
+    /// unknown; binary-search the spacer's preferred position (points from the right edge, larger
+    /// is further left) for the smallest one that lands left of the divider, i.e. right beside it.
+    private func placeSpacer(_ lo: Double = 0, _ hi: Double = 4096, done: @escaping () -> Void) {
+        let mid = hi - lo > 0.5 ? (lo + hi) / 2 : hi
+        if let old = spacer { NSStatusBar.system.removeStatusItem(old); spacer = nil }   // its dealloc clears the saved position
+        UserDefaults.standard.set(mid, forKey: "NSStatusItem Preferred Position tuck.spacer")
+        makeSpacer()
+        guard hi - lo > 0.5 else { done(); return }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) {
+            let s = BarItems.ownItemFrame("Tuck spacer"), d = BarItems.ownItemFrame("Tuck divider")
+            let left = s != nil && d != nil && s!.minX < d!.minX
+            DispatchQueue.main.async { left ? self.placeSpacer(lo, mid, done: done) : self.placeSpacer(mid, hi, done: done) }
         }
     }
 
@@ -111,6 +160,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard hiding else { return }
         divider.length = shown ? shownLength : hiddenLength
         divider.button?.alphaValue = 0
+        spacer?.length = shown ? 0 : spacerLength
     }
 
     private var dividerMidX: CGFloat? {
