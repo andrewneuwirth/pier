@@ -978,7 +978,8 @@ struct SearchPanel: View {
     @ViewBuilder private func row(_ item: SearchItem, selected: Bool) -> some View {
         switch item {
         case .entry(let entry):
-            SearchRow(entry: entry, running: model.running[entry.id] != nil, selected: selected)
+            SearchRow(entry: entry, running: model.running[entry.id] != nil, selected: selected,
+                      icon: entry.kind == .app ? AppItem(path: entry.target.path).map(model.icon(for:)) : nil)
                 .overlay { RowMouse(url: entry.target, click: { open(item) }, dropped: dropped) }
         case .file(let hit):
             FileRow(hit: hit, words: FileRank.words(search.query), selected: selected)
@@ -1052,12 +1053,14 @@ private struct SearchRow: View {
     let entry: SearchEntry
     let running: Bool
     let selected: Bool
+    /// The app's Dock icon (a chosen or alternate one), so search matches the Dock.
+    let icon: NSImage?
 
     var body: some View {
         HStack(spacing: MT.Space.s10) {
             Group {
                 switch entry.kind {
-                case .app: Image(nsImage: IconCache.icon(entry.target.path)).resizable()
+                case .app: Image(nsImage: icon ?? IconCache.icon(entry.target.path)).resizable()
                 case .setting: Image(nsImage: IconCache.icon(AppIndexer.systemSettings)).resizable()
                 case .link, .project: ProjectBadge(path: entry.projectPath, title: entry.name, host: entry.detail)
                 }
