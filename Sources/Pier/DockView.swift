@@ -637,7 +637,7 @@ struct DownloadsGrid: View {
                 Text("DOWNLOADS").font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.mtInkMuted)
                 Spacer()
                 Button("Open Folder") {
-                    NSWorkspace.shared.open(DownloadsModel.folder)
+                    FileOpener.open(DownloadsModel.folder)
                     close()
                 }
                 .buttonStyle(.glass).controlSize(.small)
@@ -692,7 +692,7 @@ private struct DownloadCell: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .onTapGesture {
-            NSWorkspace.shared.open(item.url)
+            FileOpener.open(item.url)
             close()
         }
         .draggable(item.url)

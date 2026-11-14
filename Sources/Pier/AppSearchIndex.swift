@@ -180,7 +180,7 @@ final class AppSearch {
         if case .entry(let entry) = item, entry.kind == .app, let app = AppItem(path: entry.target.path) {
             model.open(app)   // as a click on its tile: every window comes forward
         } else {
-            NSWorkspace.shared.open(url)
+            FileOpener.open(url)
         }
     }
 

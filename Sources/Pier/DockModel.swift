@@ -435,3 +435,20 @@ enum DockEdge: String, CaseIterable {
     func along(_ size: CGSize) -> CGFloat { self == .bottom ? size.width : size.height }
     func across(_ size: CGSize) -> CGFloat { self == .bottom ? size.height : size.width }
 }
+
+/// Opens files the normal way, but folders in Burrow when it's installed: macOS always hands a plain folder open to Finder,
+/// even with Burrow set as the folder handler.
+enum FileOpener {
+    static let burrow = URL(fileURLWithPath: "/Applications/Burrow.app")
+
+    static func open(_ url: URL) {
+        var dir: ObjCBool = false
+        let isFolder = url.isFileURL && FileManager.default.fileExists(atPath: url.path, isDirectory: &dir) && dir.boolValue
+            && !NSWorkspace.shared.isFilePackage(atPath: url.path)
+        if isFolder, FileManager.default.fileExists(atPath: burrow.path) {
+            NSWorkspace.shared.open([url], withApplicationAt: burrow, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
