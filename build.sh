@@ -5,6 +5,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Optional, gitignored: BUNDLE_ID, SIGN_IDENTITY and PREVIOUS_BUNDLE_ID (settings are copied once from it), see config.example.env.
+BUNDLE_ID=app.newitools.Pier
+SIGN_IDENTITY=""
+PREVIOUS_BUNDLE_ID=""
+[ -f config.local.env ] && source ./config.local.env
+
 echo "==> Building (release)…"
 swift build -c release
 
@@ -13,11 +19,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Pier "$APP/Contents/MacOS/Pier"
 cp Info.plist "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
+[ -z "$PREVIOUS_BUNDLE_ID" ] || /usr/libexec/PlistBuddy -c "Add :PierPreviousBundleID string $PREVIOUS_BUNDLE_ID" "$APP/Contents/Info.plist"
 [ -f build/AppIcon.icns ] || swift ../Kit/tools/icon-tile.swift 8e9bc4 dock.rectangle build/AppIcon.icns   # the Dispatch-style tile
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
+IDENTITY=${SIGN_IDENTITY:-}
+[ -n "$IDENTITY" ] || IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
 if [ -n "$IDENTITY" ]; then
   echo "==> Signing with $IDENTITY"
   codesign --force --options runtime --sign "$IDENTITY" "$APP"

@@ -854,7 +854,7 @@ private struct GlyphIcon: View {
     }
 }
 
-/// the owner's own Mac Tools apps (every com.example.* app in /Applications), in the apps grid.
+/// The newi tools apps (every app.newitools.* app in /Applications), in the apps grid.
 private struct MacToolsTile: View {
     let controller: DockController
     @State private var frame: CGRect = .zero

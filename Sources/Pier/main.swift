@@ -7,6 +7,7 @@ if CommandLine.arguments.contains("--self-check") {
     FileRank.selfCheck()
     SiteIcon.selfCheck()
     MainActor.assumeIsolated { ScreenshotsModel.selfCheck() }
+    Migration.selfCheck()
     print("self-check ok")
     exit(0)
 }
@@ -31,6 +32,8 @@ if let flag = CommandLine.arguments.firstIndex(of: "--ui-check") {
         NSApplication.shared.run()
     }
 }
+
+Migration.run()   // before anything reads settings (SystemDock.hide needs savedSystemDock)
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared

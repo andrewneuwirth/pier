@@ -5,7 +5,7 @@ import AppKit
 /// remembered only until Pier quits, so a link added while offline gets its icon next launch.
 enum SiteIcon {
     private static let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("com.example.pier/site-icons")
+        .appendingPathComponent("app.newitools.Pier/site-icons")
     @MainActor private static var memory: [String: NSImage?] = [:]
 
     @MainActor

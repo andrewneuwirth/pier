@@ -488,11 +488,11 @@ enum SearchHotkey {
             if status == noErr, let key { keys.append(key) } else { NSLog("Pier: \(name) is not available for Search (\(status))") }
         }
         // Outside trigger (Hammerspoon maps a mouse button to it): no faked keys, so held modifiers can't spoil it.
-        DistributedNotificationCenter.default().addObserver(forName: .init("com.example.pier.search"), object: nil, queue: .main) { _ in
+        DistributedNotificationCenter.default().addObserver(forName: .init("app.newitools.pier.search"), object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { SearchHotkey.action?() }
         }
         // The same, for pasting the newest screenshot into whatever app is in front.
-        DistributedNotificationCenter.default().addObserver(forName: .init("com.example.pier.pasteScreenshot"), object: nil, queue: .main) { _ in
+        DistributedNotificationCenter.default().addObserver(forName: .init("app.newitools.pier.pasteScreenshot"), object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { ScreenshotsModel.pasteNewest() }
         }
         if spotlightHasCommandSpace {

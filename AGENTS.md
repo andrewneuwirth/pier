@@ -14,7 +14,7 @@ A replacement for the macOS Dock, built on the newi tools design system (MacTool
 - `DockClearance.swift`: trims windows that open or resize under the bar (the auto-hidden Dock no longer reserves that strip).
 - `DockController.swift`: hover card timing, Downloads toggle, placement.
 - `AppSearch.swift`: Search's ranking for apps, settings and links (`SearchRank`) and for files (`FileRank`), pure Foundation, checked by `--self-check`.
-- `Screenshots.swift`: Search's Screenshots tab: the newest captures from the `com.apple.screencapture location` folder (else the Desktop), watched only while the panel is open, cached Quick Look thumbnails, ⌘C copies the image. Also always watches `$TMPDIR/TemporaryItems/NSIRD_screencaptureui_*` (FSEvents): a capture dragged out of the floating preview is never saved by macOS, so ~10 s after its preview closes Pier copies it into the screenshot folder (never when a file of that name is already there). The distributed notification `com.example.pier.pasteScreenshot` puts the newest capture of the last 10 minutes on the clipboard and sends ⌘V (needs Accessibility); nothing that recent beeps.
+- `Screenshots.swift`: Search's Screenshots tab: the newest captures from the `com.apple.screencapture location` folder (else the Desktop), watched only while the panel is open, cached Quick Look thumbnails, ⌘C copies the image. Also always watches `$TMPDIR/TemporaryItems/NSIRD_screencaptureui_*` (FSEvents): a capture dragged out of the floating preview is never saved by macOS, so ~10 s after its preview closes Pier copies it into the screenshot folder (never when a file of that name is already there). The distributed notification `app.newitools.pier.pasteScreenshot` puts the newest capture of the last 10 minutes on the clipboard and sends ⌘V (needs Accessibility); nothing that recent beeps.
 - `FileSearch.swift`: files by name from the Spotlight index (`FileQuery`, cancellable, off the main thread) and Quick Look for the selected file.
 - `AppSearchIndex.swift`: the index of apps and System Settings panes (built off the main thread, rebuilt when an Applications folder changes), scopes and grouped sections, launch counts in UserDefaults, the Spotlight-style panel's controller and keys, and the Option-Space and Command-Space hot keys (Command-Space only fires once Spotlight's own shortcut is turned off in System Settings; Pier reads that setting, never writes it).
 - `DockView.swift`: all SwiftUI.
@@ -39,5 +39,5 @@ swift run Pier --ui-check DIR # opens the real search panel (no bar), drives it 
 ## Rules
 
 - Never kill or replace the Dock process beyond `killall Dock` to reload settings: Mission Control, ⌘Tab and Spaces live in it.
-- The bundle id `com.example.pier` never changes.
+- The bundle id is `app.newitools.Pier` (set by `build.sh`; override with `config.local.env`). Settings from the old id are copied once on first launch (`Migration.swift`).
 - Colours, radii, spacing and motion come from MacToolsKit, never literals.
