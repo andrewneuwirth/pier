@@ -115,7 +115,10 @@ final class DockModel {
     /// Set through DockController.setEdge, which also saves it.
     var edge = DockEdge.saved
 
-    let finder = AppItem(path: "/System/Library/CoreServices/Finder.app")!
+    /// The fixed first tile: the file browser. Burrow when it's installed (it stands in for Finder), else Finder.
+    let finder = AppItem(path: "/Applications/Burrow.app") ?? AppItem(path: "/System/Library/CoreServices/Finder.app")!
+    /// Finder itself never gets a running tile: it always runs (it draws the desktop), and Burrow has its place.
+    private static let finderID = AppItem(path: "/System/Library/CoreServices/Finder.app")!.id
 
     @ObservationIgnored private var file = GroupsFile.starter
     @ObservationIgnored private var lastUsed: [String: Date] = [:]
@@ -203,7 +206,7 @@ final class DockModel {
         }
         running = map
 
-        let pinned = Set(groups.flatMap { $0.map(\.id) } + [finder.id])
+        let pinned = Set(groups.flatMap { $0.map(\.id) } + [finder.id, Self.finderID])
         let hidden = Set(file.hidden ?? [])
         let open = order.filter { !pinned.contains($0.item.id) && !hidden.contains($0.item.id) && !hidden.contains($0.item.url.path) }
             .sorted { $0.launched < $1.launched }

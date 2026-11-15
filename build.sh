@@ -13,7 +13,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Pier "$APP/Contents/MacOS/Pier"
 cp Info.plist "$APP/Contents/Info.plist"
-[ -f build/AppIcon.icns ] || swift ../Kit/tools/icon.swift 8e9bc4 dock.rectangle build/AppIcon.icns
+[ -f build/AppIcon.icns ] || swift ../Kit/tools/icon-tile.swift 8e9bc4 dock.rectangle build/AppIcon.icns   # the Dispatch-style tile
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 

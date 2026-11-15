@@ -100,7 +100,8 @@ struct DockView: View {
             AppTile(item: model.finder, controller: controller)
             ForEach(Array(model.groups.enumerated()), id: \.offset) { _, group in
                 GroupDivider()
-                ForEach(group) { AppTile(item: $0, controller: controller) }
+                // A pinned copy of the first tile's app (Burrow pinned in a group) would show it twice.
+                ForEach(group.filter { $0 != model.finder }) { AppTile(item: $0, controller: controller) }
             }
             if !model.recent.isEmpty || !model.overflow.isEmpty {
                 GroupDivider()
@@ -378,8 +379,10 @@ private struct StatsCluster: View {
     }
 }
 
-/// The design system's StatRing at bar size: 40pt instead of 56.
+/// The design system's StatRing at bar size: scaled to the tiles, a bit under an icon (whose art has its own margin).
 private struct MiniRing: View {
+    @Environment(\.tileSize) private var tile
+    private var size: CGFloat { (tile * 0.85).rounded() }
     let percent: Double?
     let secondary: Double?
     let label: String
@@ -395,12 +398,12 @@ private struct MiniRing: View {
                 Group {
                     if let percent { Text("\(Int(percent.rounded()))").contentTransition(.numericText()) } else { Text("–") }
                 }
-                .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(.system(size: size * 0.27, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundStyle(MTStatus.forUsage(percent ?? 0)?.color ?? Color.mtInk)
-                Text(label).font(.system(size: 6, weight: .semibold)).foregroundStyle(Color.mtInkMuted)
+                Text(label).font(.system(size: size * 0.15, weight: .semibold)).foregroundStyle(Color.mtInkMuted)
             }
         }
-        .frame(width: 40, height: 40)
+        .frame(width: size, height: size)
         .contentShape(.circle)
         .glassEffect(.regular.interactive(), in: .circle)
         .animation(MT.Motion.allowed(MT.Motion.value), value: percent)
@@ -430,6 +433,8 @@ private struct Arc: View {
 
 private struct ThermalBadge: View {
     let state: ProcessInfo.ThermalState
+    @Environment(\.tileSize) private var tile
+    private var size: CGFloat { (tile * 0.85).rounded() }
 
     var body: some View {
         let (word, status): (String, MTStatus) = switch state {
@@ -440,10 +445,10 @@ private struct ThermalBadge: View {
         @unknown default: ("Normal", .good)
         }
         VStack(spacing: 2) {
-            Image(systemName: "thermometer.medium").font(.system(size: 14, weight: .medium)).foregroundStyle(status.color)
-            Text(word).font(.system(size: 8, weight: .semibold)).foregroundStyle(Color.mtInkMuted)
+            Image(systemName: "thermometer.medium").font(.system(size: size * 0.35, weight: .medium)).foregroundStyle(status.color)
+            Text(word).font(.system(size: size * 0.2, weight: .semibold)).foregroundStyle(Color.mtInkMuted)
         }
-        .frame(width: 40, height: 40)
+        .frame(width: size, height: size)
         .help("Thermal state: \(word)")
         .accessibilityElement(children: .combine)
     }
@@ -1366,6 +1371,7 @@ private struct ProjectBadge: View {
     let title: String
     let host: String
     @State private var icon: ProjectIcon.Found?
+    @State private var site: NSImage?
     @MainActor private static var cache: [String: ProjectIcon.Found] = [:]
 
     var body: some View {
@@ -1373,6 +1379,10 @@ private struct ProjectBadge: View {
             if let icon {
                 Image(nsImage: icon.image).resizable().interpolation(.high).scaledToFit()
                     .clipShape(.rect(cornerRadius: icon.isMacIcon ? 0 : 7, style: .continuous))
+            } else if let site {
+                // Favicons are often transparent and dark: a white plate keeps them visible on the glass.
+                Image(nsImage: site).resizable().interpolation(.high).scaledToFit().padding(3)
+                    .background(.white, in: .rect(cornerRadius: 7, style: .continuous))
             } else {
                 Text(String(title.prefix(1)).uppercased())
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white)
@@ -1383,8 +1393,12 @@ private struct ProjectBadge: View {
             }
         }
         .frame(width: 26, height: 26)
-        .task(id: path) {
-            guard let path else { return }
+        .task(id: path ?? host) {
+            guard let path else {
+                // A web link: the site's own icon, drawn like a Mac icon would be (rounded below).
+                site = await SiteIcon.load(host)
+                return
+            }
             if let cached = Self.cache[path] { icon = cached; return }
             let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Developer").appendingPathComponent(path)
             let found = await Task.detached(priority: .utility) { ProjectIcon.find(root: root, app: nil) }.value

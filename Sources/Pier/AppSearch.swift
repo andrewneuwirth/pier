@@ -276,7 +276,22 @@ struct FileHit: Identifiable, Equatable, Sendable {
 enum FileRank {
     /// 200 apart. Among files of one kind, date and place add between -30 and +140, so the better name match
     /// always wins. The kind of file (`kind`) and a file you picked before for the same text can outweigh a step.
-    enum Tier { static let exact = 1000, prefix = 800, wordStart = 600, substring = 400 }
+    enum Tier { static let exact = 1000, prefix = 800, wordStart = 600, substring = 400, path = 300 }
+
+    /// The typed words that appear nowhere in the path; "app store" counts as in "app-store" and "Appstore".
+    static func missing(_ words: [String], _ path: String) -> Int {
+        func compact(_ s: String) -> String { String(s.lowercased().filter { $0.isLetter || $0.isNumber }) }
+        let text = compact(path)
+        return words.filter { !text.contains(compact($0)) }.count
+    }
+
+    /// Folders whose whole path has every typed word (or all but one, from three words up, so a word the folders
+    /// don't use, like "mockup", doesn't hide them): the 30 most recent. Folders only: listing what is inside each
+    /// one buried the newest folder under the files of older ones.
+    static func viaPath(_ words: [String], folders: [FileHit], home: String) -> [FileHit] {
+        let allowed = words.count >= 3 ? 1 : 0
+        return Array(folders.lazy.filter { keep($0.path, home: home) && missing(words, String($0.path.dropFirst(home.count))) <= allowed }.prefix(30))
+    }
 
     /// What a person opens by hand comes first: documents, then folders, pictures and recordings, archives and
     /// installers, anything else; source code and data files well below, so `transcript.ts` sits under the PDFs
@@ -356,7 +371,11 @@ enum FileRank {
     }
 
     static func score(_ hit: FileHit, words: [String], home: String, usage: SearchUsage = SearchUsage(), now: Date) -> Int {
-        var score = fit(words, hit.name) + kind(hit)
+        // Found by its folders' names rather than its own: under every name match, less for each word the path lacks.
+        // Each word in its own name lifts it a little, so the folder that matched sits above what is inside it.
+        let inName = words.filter { hit.name.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }.count
+        var score = (inName == words.count ? fit(words, hit.name)
+                     : Tier.path - 100 * missing(words, String(hit.path.dropFirst(home.count))) + 30 * inName) + kind(hit)
         // Recency, strongly: 87 for yesterday, 45 at a month, 7 at a year, 1 for 2021.
         if let date = hit.date { score += Int(90 / (1 + max(0, now.timeIntervalSince(date)) / 86_400 / 30)) }
         let folders = place((hit.path as NSString).deletingLastPathComponent, home: home).split(separator: "/")
@@ -439,6 +458,14 @@ enum FileRank {
         check("files: dates read Today, Yesterday, Jan 3, Mar 2024",
               [0, 1, 12, 1040].map { when(noon.addingTimeInterval(-$0 * day), now: noon, calendar: utc, locale: Locale(identifier: "en_US")) }
                 == ["Today", "Yesterday", "Jan 3", "Mar 2024"])
+        check("files: words in the folder path count, joined or spaced: 1 of acme/app/store/mockup missing",
+              missing(["acme", "app", "store", "mockup"], "/Developer/Acme-iOS/marketing/app-store-screenshots/en/03-home.png") == 1)
+        check("files: a name match ranks above a file found by its folders",
+              top("acme app store", [file("Developer/Acme/app-store/03-home.png", daysAgo: 0), file("a/acme appstore.pdf")]).first
+                == "a/acme appstore.pdf")
+        check("files: the folder found by its path sits above what is inside it",
+              top("acme app store", [file("dev/Acme/app-store/_header", daysAgo: 0), file("dev/Acme/app-store", daysAgo: 1)]).first
+                == "dev/Acme/app-store")
         check("files: the typed part of the name is found for emphasis",
               emphasis("College-Unofficial-Transcript.pdf", ["transcript"]).map { String("College-Unofficial-Transcript.pdf"[$0]) } == ["Transcript"])
     }

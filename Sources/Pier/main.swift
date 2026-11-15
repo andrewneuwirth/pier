@@ -5,9 +5,21 @@ import MacToolsKit
 if CommandLine.arguments.contains("--self-check") {
     SearchRank.selfCheck()
     FileRank.selfCheck()
+    SiteIcon.selfCheck()
     MainActor.assumeIsolated { ScreenshotsModel.selfCheck() }
     print("self-check ok")
     exit(0)
+}
+
+// `Pier --find "acme app store"`: the file results the search panel would show, as paths.
+if let flag = CommandLine.arguments.firstIndex(of: "--find"), let query = CommandLine.arguments.dropFirst(flag + 1).first {
+    Task {
+        let ranked = await FileQuery.ranked(query, usage: SearchUsage())
+        for hit in ranked?.rows.prefix(25) ?? [] { print(hit.path) }
+        print("\(ranked?.total ?? 0) results")
+        exit(0)
+    }
+    dispatchMain()
 }
 
 // The search panel for real: opens it, drives it with key events sent to Pier only, saves two pictures, quits.
@@ -31,7 +43,6 @@ MainActor.assumeIsolated {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dock: DockController?
-    private var menuBar: MenuBarController?
 
     /// Parked tab windows are off screen; put every one back before Pier goes.
     func applicationWillTerminate(_ notification: Notification) {
@@ -54,8 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DockBadges.requestAccessOnce()   // unread badges and raising one exact window
         dock = DockController()
-        menuBar = MenuBarController { [weak self] in self?.dock?.quit() }
-        menuBar?.start()
     }
 }
 

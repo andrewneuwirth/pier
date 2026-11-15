@@ -7,7 +7,6 @@ the owner's replacement for the macOS Dock, the first app built on the Mac Tools
 - Swift 6.2 tools, Swift 5 language mode, SwiftPM, macOS 26. AppKit windows hosting SwiftUI. Depends on `../Kit` (MacToolsKit: tokens, usage file, login item).
 - `main.swift`: app start, and `SystemDock`, which hides the macOS Dock (auto-hide plus a 1000s delay) and restores the user's own values only on Quit Pier.
 - `DockModel.swift`: groups file, the shared Projects list, running apps, memory and thermal stats, the usage reading.
-- `MenuBar/`: Pier's one menu bar button (moved from Tuck, history merged in; `git log --follow` works). Left-click: a glass list of every menu bar icon, opened through Accessibility (Pier's own grant). Right-click: Show Hidden Icons, Open at Login, Quit Pier. An invisible divider status item left of the button tucks every icon left of it; on macOS 27 the divider is sized just too wide for the notch bar (so it lands in the system « overflow there) and a second invisible spacer, about half the widest screen, does the same on wider bars without a notch (the external MAG321UP). Keep that sizing and its comments as they are: each number fixes a real bug. ⌘-drag icons across the divider (with Show Hidden Icons on) to choose what stays visible.
 - `Usage/`: fetches the Claude and ChatGPT usage (moved from Usage Rings, history merged in) and writes `~/Library/Application Support/UsageRings/usage.json` through Kit's `UsageSnapshot.write`. Every 5 min, 30 in Low Power Mode, nothing while the display sleeps; per-service cooldowns (60 s, 5 min after a 429). Claude: `api.anthropic.com/api/oauth/usage` with the token from the login keychain item `Claude Code-credentials` (read through `/usr/bin/security` at request time). ChatGPT: `chatgpt.com/backend-api/wham/usage` with `~/.codex/auth.json`. Tokens are never written, logged or cached. Never use `claude -p` to read usage (costs money, no limits in output).
 - `Downloads.swift`: ~/Downloads, newest first, watched live.
 - `WindowPreviews.swift`: ScreenCaptureKit thumbnails (Screen Recording) and raising one window (Accessibility).
@@ -36,7 +35,6 @@ swift run Pier --ui-check DIR # opens the real search panel (no bar), drives it 
 - UserDefaults `savedSystemDock`: the macOS Dock settings from before Pier, put back by Quit Pier.
 - `~/Library/Application Support/Projects/projects.json`: the Projects list (title, url, path, start), shared with the Projects app through Kit's `ProjectLinks`; either app adding or editing a project updates it, and Pier watches its folder. Moved out of groups.json's `projectLinks` on first launch.
 - `~/Library/Application Support/UsageRings/usage.json`: written by `Usage/` (the folder keeps Usage Rings' name so Kit's reader is unchanged).
-- UserDefaults `menuBarShowAll` and `NSStatusItem Preferred Position pier.*`: the menu bar button's state.
 
 ## Rules
 

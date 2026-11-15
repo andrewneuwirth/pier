@@ -12,18 +12,28 @@ enum FileQuery {
     static let patience = 1.5
 
     /// Asked and ranked, both off the main thread.
+    /// Name matches, plus what sits in folders whose path has the words: "acme app store" finds
+    /// ~/Developer/Acme-iOS/marketing/app-store-screenshots, though no file name says so.
     @concurrent static func ranked(_ query: String, in folder: String? = nil, usage: SearchUsage) async -> (rows: [FileHit], total: Int)? {
-        await run(FileRank.words(query), in: folder).map { FileRank.rank(query, $0, home: NSHomeDirectory(), usage: usage) }
+        let words = FileRank.words(query), home = NSHomeDirectory()
+        async let named = run(words, in: folder)
+        async let folders = words.count >= 2 ? run(words, in: folder, anyWord: true) : []
+        guard let named = await named else { return nil }
+        var seen = Set(named.map(\.path))
+        let more = FileRank.viaPath(words, folders: await folders ?? [], home: home).filter { seen.insert($0.path).inserted }
+        return FileRank.rank(query, named + more, home: home, usage: usage)
     }
 
     /// Every file and folder whose name contains all the words, in `folder`, or else in your home folder (iCloud
     /// Drive and cloud storage included) and on other mounted volumes. nil when Spotlight would not run the query.
     /// Waits for Spotlight off the main thread; cancelling the task stops the query at once.
-    @concurrent static func run(_ words: [String], in folder: String? = nil) async -> [FileHit]? {
-        let text = words.map { word -> String in
+    /// `anyWord`: instead, folders whose name has any of the words.
+    @concurrent static func run(_ words: [String], in folder: String? = nil, anyWord: Bool = false) async -> [FileHit]? {
+        var text = words.map { word -> String in
             let safe = word.replacing(#/[\\"*]/#) { "\\" + $0.0 }   // the query language's own characters, taken literally
             return "kMDItemFSName == \"*" + safe + "*\"cd"
-        }.joined(separator: " && ")
+        }.joined(separator: anyWord ? " || " : " && ")
+        if anyWord { text = "(" + text + ") && kMDItemContentType == \"public.folder\"" }
         let wanted = [kMDItemLastUsedDate, kMDItemFSContentChangeDate, kMDItemContentType] as CFArray
         guard !words.isEmpty, !Task.isCancelled,
               let made = MDQueryCreate(kCFAllocatorDefault, text as CFString, wanted, [kMDItemFSContentChangeDate] as CFArray) else { return nil }
