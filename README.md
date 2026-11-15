@@ -34,7 +34,7 @@ swift build && .build/debug/Pier --self-check   # should print "self-check ok"
 open build/Pier.app
 ```
 
-Pier uses MacToolsKit from [newitools/kit](https://github.com/newitools/kit); SwiftPM fetches it, or uses a checkout at
+Pier uses MacToolsKit from [mac-tools-kit](https://github.com/andrewneuwirth/mac-tools-kit); SwiftPM fetches it, or uses a checkout at
 `../Kit` if you have one. `build.sh` signs with your Apple Development identity if you have one (a stable signature keeps
 the Accessibility and Screen Recording grants across rebuilds), otherwise ad hoc. To use your own bundle id or signing
 identity, copy `config.example.env` to `config.local.env` and edit it.

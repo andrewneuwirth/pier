@@ -4,7 +4,7 @@ Thanks for helping. Read [AGENTS.md](AGENTS.md) first: it explains every source 
 
 ## Build and check
 
-Pier uses MacToolsKit from the [kit](https://github.com/newitools/kit) repository. Clone it next to this folder
+Pier uses MacToolsKit from the [mac-tools-kit](https://github.com/andrewneuwirth/mac-tools-kit) repository. Clone it next to this folder
 (`../Kit`) to work on both; otherwise SwiftPM fetches it.
 
 ```sh

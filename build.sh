@@ -21,8 +21,7 @@ cp .build/release/Pier "$APP/Contents/MacOS/Pier"
 cp Info.plist "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
 [ -z "$PREVIOUS_BUNDLE_ID" ] || /usr/libexec/PlistBuddy -c "Add :PierPreviousBundleID string $PREVIOUS_BUNDLE_ID" "$APP/Contents/Info.plist"
-[ -f build/AppIcon.icns ] || swift ../Kit/tools/icon-tile.swift 8e9bc4 dock.rectangle build/AppIcon.icns   # the Dispatch-style tile
-cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # drawn once with Kit's tools/icon-tile.swift (8e9bc4, dock.rectangle)
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
 IDENTITY=${SIGN_IDENTITY:-}
