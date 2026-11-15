@@ -97,18 +97,6 @@ Other tools (Hammerspoon, a mouse utility) can post these distributed notificati
 | `app.newitools.pier.search` | Opens or closes search |
 | `app.newitools.pier.pasteScreenshot` | Pastes the newest screenshot from the last 10 minutes into the front app |
 
-## Under the hood
-
-6,693 lines of Swift in 28 files under `Sources/Pier` (November 2026). The largest files:
-
-```mermaid
-xychart-beta
-    title "Lines of Swift, largest files"
-    x-axis ["DockView", "CustomizeUI", "TabGroups", "AppSearchIndex", "DockModel", "AppSearch", "DockController", "Screenshots"]
-    y-axis "Lines" 0 --> 1600
-    bar [1520, 627, 542, 508, 481, 472, 435, 349]
-```
-
 ## Privacy
 
 Pier runs entirely on your Mac and collects nothing. The only requests it makes are for website icons and, if you're
