@@ -15,6 +15,8 @@ final class UsagePoller {
     private var isRefreshing = false
     private var timer: Timer?
     private var awake = true
+    /// Off while the Memory & AI Usage widget isn't in the bar: then nothing is requested at all.
+    var enabled: Bool { didSet { if enabled && !oldValue { refresh() } } }
     /// Called after a write that changed what is stored.
     var onChange: () -> Void = {}
 
@@ -28,7 +30,8 @@ final class UsagePoller {
         ProcessInfo.processInfo.isLowPowerModeEnabled ? 30 * 60 : 5 * 60
     }
 
-    init() {
+    init(enabled: Bool) {
+        self.enabled = enabled
         let notifications = NSWorkspace.shared.notificationCenter
         notifications.addObserver(forName: NSWorkspace.screensDidSleepNotification,
                                   object: nil, queue: .main) { [weak self] _ in
@@ -62,7 +65,7 @@ final class UsagePoller {
     func refresh() {
         let now = Date()
         let due = UsageService.allCases.filter { (nextAllowed[$0] ?? .distantPast) <= now }
-        guard !isRefreshing, !due.isEmpty else { return }
+        guard enabled, !isRefreshing, !due.isEmpty else { return }
 
         isRefreshing = true
         Task {

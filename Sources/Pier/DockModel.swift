@@ -129,13 +129,14 @@ final class DockModel {
     @ObservationIgnored private var timers: [Timer] = []
     @ObservationIgnored private var groupsWatch: [DispatchSourceFileSystemObject] = []
     @ObservationIgnored private var lastStatus: [pid_t: String] = [:]
-    @ObservationIgnored private let usagePoller = UsagePoller()
+    @ObservationIgnored private var usagePoller: UsagePoller?
 
     init() {
         reloadGroups()
         refreshStats()
         usage = UsageSnapshot.read()
-        usagePoller.onChange = { [weak self] in self?.usage = UsageSnapshot.read() }
+        usagePoller = UsagePoller(enabled: widgets.contains(.stats))   // after reloadGroups read the widgets
+        usagePoller?.onChange = { [weak self] in self?.usage = UsageSnapshot.read() }
         refreshBadges()
 
         let ws = NSWorkspace.shared.notificationCenter
@@ -197,6 +198,7 @@ final class DockModel {
         groupNames = file.groups.map(\.name)
         let parsed = Widget.parse(file.widgets)
         if widgets != parsed { widgets = parsed }
+        usagePoller?.enabled = parsed.contains(.stats)
         refreshRunning()
     }
 
