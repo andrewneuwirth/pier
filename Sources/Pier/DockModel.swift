@@ -45,7 +45,7 @@ struct GroupsFile: Codable {
         .appendingPathComponent("Library/Application Support/Pier")
     static let url = folder.appendingPathComponent("groups.json")
 
-    /// the owner's Dock as it was on 2026-10-13, sorted into groups.
+    /// A starter layout for the first launch; edit groups.json to make it yours.
     static let starter = GroupsFile(groups: [
         .init(name: "Code", apps: ["/Applications/Visual Studio Code.app", "/Applications/Xcode.app",
                                    "/Applications/Android Studio.app", "/System/Applications/Utilities/Terminal.app",

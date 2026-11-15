@@ -1,6 +1,6 @@
 # AGENTS.md: Pier
 
-the owner's replacement for the macOS Dock, the first app built on the Mac Tools design system (the design system; read its `project/README.md` before UI changes). It replaced Docky, which was too buggy: keep this small and solid.
+A replacement for the macOS Dock, built on the newi tools design system (MacToolsKit, in the sibling `Kit` repo). It replaced Docky, which was too buggy: keep this small and solid.
 
 ## Stack
 
