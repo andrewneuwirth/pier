@@ -17,7 +17,9 @@ A replacement for the macOS Dock, built on the newi tools design system (MacTool
 - `Screenshots.swift`: Search's Screenshots tab: the newest captures from the `com.apple.screencapture location` folder (else the Desktop), watched only while the panel is open, cached Quick Look thumbnails, ⌘C copies the image. Also always watches `$TMPDIR/TemporaryItems/NSIRD_screencaptureui_*` (FSEvents): a capture dragged out of the floating preview is never saved by macOS, so ~10 s after its preview closes Pier copies it into the screenshot folder (never when a file of that name is already there). The distributed notification `app.newitools.pier.pasteScreenshot` puts the newest capture of the last 10 minutes on the clipboard and sends ⌘V (needs Accessibility); nothing that recent beeps.
 - `FileSearch.swift`: files by name from the Spotlight index (`FileQuery`, cancellable, off the main thread) and Quick Look for the selected file.
 - `AppSearchIndex.swift`: the index of apps and System Settings panes (built off the main thread, rebuilt when an Applications folder changes), scopes and grouped sections, launch counts in UserDefaults, the Spotlight-style panel's controller and keys, and the Option-Space and Command-Space hot keys (Command-Space only fires once Spotlight's own shortcut is turned off in System Settings; Pier reads that setting, never writes it).
-- `DockView.swift`: all SwiftUI.
+- `Customize.swift`: the bar's widgets (`Widget`: show, hide, reorder; saved as `widgets` in groups.json), the Customize Pier window (right-click the bar) with Widgets / App Groups / Permissions / Search pages, the same pages as the first-launch walkthrough (shown when there's no groups.json and `onboarded` isn't set), and `DockImport` (the macOS Dock's pinned apps).
+- `Migration.swift`: one-time copy of settings from `PREVIOUS_BUNDLE_ID` (config.local.env → Info.plist `PierPreviousBundleID`).
+- `DockView.swift`: the bar and its popups (SwiftUI).
 
 ## Commands
 
@@ -25,13 +27,15 @@ A replacement for the macOS Dock, built on the newi tools design system (MacTool
 swift build              # compile check
 swift run Pier --self-check   # ranking checks, prints "self-check ok"; starts nothing
 swift run Pier --ui-check DIR # opens the real search panel (no bar), drives it with keys sent to Pier only, saves two screenshots to DIR; takes the keyboard for ~5 s
+swift run Pier --customize-preview DIR   # the walkthrough and Customize pages as PNGs (light + dark), made-up data, no window
 ./build.sh               # build/Pier.app
 ./build.sh --install     # replace /Applications/Pier.app and relaunch: only when the owner asks
 ```
 
 ## Where data lives
 
-- `~/Library/Application Support/Pier/groups.json`: app groups, hand-edited (right-click the bar › Edit Groups…). Reloaded on save.
+- `~/Library/Application Support/Pier/groups.json`: app groups, widgets, links and icons; edited in Customize Pier… or by hand (Open groups.json). Reloaded on save.
+- UserDefaults `onboarded` (walkthrough seen), `macToolsExtraPrefix` (optional extra bundle-id prefix for the newi tools grid).
 - UserDefaults `savedSystemDock`: the macOS Dock settings from before Pier, put back by Quit Pier.
 - `~/Library/Application Support/Projects/projects.json`: the Projects list (title, url, path, start), shared with the Projects app through Kit's `ProjectLinks`; either app adding or editing a project updates it, and Pier watches its folder. Moved out of groups.json's `projectLinks` on first launch.
 - `~/Library/Application Support/UsageRings/usage.json`: written by `Usage/` (the folder keeps Usage Rings' name so Kit's reader is unchanged).

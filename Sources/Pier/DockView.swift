@@ -98,37 +98,19 @@ struct DockView: View {
         let edge = model.edge
         edge.stack(spacing: MT.Space.s4) {
             AppTile(item: model.finder, controller: controller)
-            ForEach(Array(model.groups.enumerated()), id: \.offset) { _, group in
-                GroupDivider()
-                // A pinned copy of the first tile's app (Burrow pinned in a group) would show it twice.
-                ForEach(group.filter { $0 != model.finder }) { AppTile(item: $0, controller: controller) }
+            // The widgets chosen in Customize, a divider wherever the cluster changes; empty ones take no room.
+            let shown = model.widgets.filter { !isEmpty($0) }
+            ForEach(Array(shown.enumerated()), id: \.element) { index, widget in
+                if index == 0 || shown[index - 1].cluster != widget.cluster { GroupDivider() }
+                self.widget(widget)
             }
-            if !model.recent.isEmpty || !model.overflow.isEmpty {
-                GroupDivider()
-                ForEach(model.recent) { AppTile(item: $0, controller: controller) }
-                if !model.overflow.isEmpty { OverflowTile(controller: controller) }
-            }
-            GroupDivider()
-            SearchTile(controller: controller)
-            StatsCluster(model: model, controller: controller)
-            GroupDivider()
-            if !controller.minimized.windows.isEmpty {
-                // Like the macOS Dock: minimized windows get their own section.
-                ForEach(controller.minimized.windows) { MinimizedTile(window: $0, minimized: controller.minimized) }
-                GroupDivider()
-            }
-            LinksTile(controller: controller, kind: .quick)
-            LinksTile(controller: controller, kind: .projects)
-            MacToolsTile(controller: controller)
-            DownloadsTile(controller: controller)
-            TrashTile(controller: controller)
         }
         .padding(MT.Space.s6)
         .glassEffect(.regular, in: .rect(cornerRadius: MT.Radius.panel))
         .environment(\.tileSize, model.tileSize)
         .environment(\.dockEdge, edge)
         .contextMenu {
-            Button("Edit Groups…") { controller.editGroups() }
+            Button("Customize Pier…") { controller.customize() }
             Menu("Show On") {
                 ForEach(NSScreen.screens.map(\.localizedName), id: \.self) { name in
                     Toggle(name, isOn: Binding(get: { controller.screenName == name },
@@ -147,6 +129,42 @@ struct DockView: View {
         .onChange(of: openAtLogin) { _, on in LoginItem.set(on) }
         // Clear headroom beyond the glass, so a bouncing or hovered icon isn't clipped by the window edge.
         .fixedSize().padding(edge.headroom, 12)
+    }
+
+    private func isEmpty(_ widget: Widget) -> Bool {
+        let model = controller.model
+        switch widget {
+        case .groups: return model.groups.allSatisfy { $0.allSatisfy { $0 == model.finder } }
+        case .recent: return model.recent.isEmpty && model.overflow.isEmpty
+        case .minimized: return controller.minimized.windows.isEmpty
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private func widget(_ widget: Widget) -> some View {
+        let model = controller.model
+        switch widget {
+        case .groups:
+            ForEach(Array(model.groups.enumerated()), id: \.offset) { index, group in
+                if index > 0 { GroupDivider() }
+                // A pinned copy of the first tile's app (Burrow pinned in a group) would show it twice.
+                ForEach(group.filter { $0 != model.finder }) { AppTile(item: $0, controller: controller) }
+            }
+        case .recent:
+            ForEach(model.recent) { AppTile(item: $0, controller: controller) }
+            if !model.overflow.isEmpty { OverflowTile(controller: controller) }
+        case .search: SearchTile(controller: controller)
+        case .stats: StatsCluster(model: model, controller: controller)
+        case .minimized:
+            // Like the macOS Dock: minimized windows get their own section.
+            ForEach(controller.minimized.windows) { MinimizedTile(window: $0, minimized: controller.minimized) }
+        case .quickLinks: LinksTile(controller: controller, kind: .quick)
+        case .projects: LinksTile(controller: controller, kind: .projects)
+        case .macTools: MacToolsTile(controller: controller)
+        case .downloads: DownloadsTile(controller: controller)
+        case .trash: TrashTile(controller: controller)
+        }
     }
 }
 

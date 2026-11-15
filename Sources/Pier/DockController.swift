@@ -357,10 +357,7 @@ final class DockController {
 
     // MARK: Pier
 
-    func editGroups() {
-        _ = GroupsFile.load()   // make sure there's a file to open
-        NSWorkspace.shared.open(GroupsFile.url)
-    }
+    func customize() { CustomizeWindow.show(model) }
 
     func quit() {
         SystemDock.restore()

@@ -8,6 +8,7 @@ if CommandLine.arguments.contains("--self-check") {
     SiteIcon.selfCheck()
     MainActor.assumeIsolated { ScreenshotsModel.selfCheck() }
     Migration.selfCheck()
+    DockImport.selfCheck()
     print("self-check ok")
     exit(0)
 }
@@ -21,6 +22,12 @@ if let flag = CommandLine.arguments.firstIndex(of: "--find"), let query = Comman
         exit(0)
     }
     dispatchMain()
+}
+
+if let flag = CommandLine.arguments.firstIndex(of: "--customize-preview") {
+    let folder = CommandLine.arguments.dropFirst(flag + 1).first ?? FileManager.default.currentDirectoryPath
+    MainActor.assumeIsolated { CustomizePreview.run(into: folder) }
+    exit(0)
 }
 
 // The search panel for real: opens it, drives it with key events sent to Pier only, saves two pictures, quits.
@@ -66,8 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LoginItem.set(true)
             UserDefaults.standard.set(true, forKey: "loginItemDefaulted")
         }
-        DockBadges.requestAccessOnce()   // unread badges and raising one exact window
+        // Read before DockController writes the starter groups.json: no file and never onboarded = a new user.
+        let firstRun = !UserDefaults.standard.bool(forKey: "onboarded") && !FileManager.default.fileExists(atPath: GroupsFile.url.path)
+        if !firstRun { DockBadges.requestAccessOnce() }   // unread badges and raising one exact window; new users get the walkthrough's page
         dock = DockController()
+        if firstRun, let dock { CustomizeWindow.show(dock.model, walkthrough: true) }
     }
 }
 

@@ -36,6 +36,8 @@ struct GroupsFile: Codable {
     var myNumber: String?
     /// Quick Links, in order. (Perch's favorites were copied in when it was retired.)
     var links: [Link]?
+    /// The bar's widgets, in order (Customize › Widgets); missing = all of them.
+    var widgets: [String]?
     /// Old home of the Projects list; moved once into the shared ProjectLinks.file (see reloadGroups).
     var projectLinks: [Link]?
     /// title, url, and for project links the folder (`path`) and the command that starts its server (`start`).
@@ -79,6 +81,7 @@ struct GroupsFile: Codable {
 final class DockModel {
     private(set) var groups: [[AppItem]] = []
     private(set) var groupNames: [String] = []
+    private(set) var widgets = Widget.allCases
     private(set) var links: [GroupsFile.Link] = []
     private(set) var projectLinks: [GroupsFile.Link] = []
 
@@ -192,7 +195,24 @@ final class DockModel {
         let loaded = file.groups.map { ($0.name, $0.apps.compactMap(AppItem.init(path:))) }.filter { !$0.1.isEmpty }
         groups = loaded.map(\.1)
         groupNames = file.groups.map(\.name)
+        let parsed = Widget.parse(file.widgets)
+        if widgets != parsed { widgets = parsed }
         refreshRunning()
+    }
+
+    /// The groups as saved, apps that aren't installed included, for Customize › App Groups.
+    var groupList: [GroupsFile.Group] { file.groups }
+
+    func setGroups(_ list: [GroupsFile.Group]) {
+        file.groups = list
+        file.save()
+        reloadGroups()
+    }
+
+    func setWidgets(_ list: [Widget]) {
+        file.widgets = list.map(\.rawValue)
+        file.save()
+        reloadGroups()
     }
 
     private func refreshRunning() {
