@@ -3,7 +3,7 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26   # Pier targets macOS 26, so its self-check binary only runs there
     steps:
       # Pier builds against a Kit checkout next to it when there is one (see Package.swift).
       - uses: actions/checkout@v4

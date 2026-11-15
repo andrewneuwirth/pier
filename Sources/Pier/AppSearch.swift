@@ -223,7 +223,7 @@ enum SearchRank {
 
         check("tiers: exact > prefix > word start > acronym > substring > fuzzy > typo",
               [score("notes", "Notes"), score("not", "Notes"), score("code", "Visual Studio Code"), score("vsc", "Visual Studio Code"),
-               score("ode", "Xcode"), score("chrme", "Chrome"), score("chrmoe", "Chrome")]
+               score("ode", "Xcode"), score("chrme", "Chrome"), score("chrmoe", "Chrome")] as [Int]   // the CI compiler finds the overloads ambiguous without it
                 == [Tier.exact, Tier.prefix, Tier.wordStart, Tier.acronym, Tier.substring, Tier.fuzzy - 10, Tier.typo + Tier.exact / 10])
         check("exact before prefix: notes -> Notes, Notes Plus", top("notes") == ["Notes", "Notes Plus"])
         check("another name in full, prefix, substring: code -> Visual Studio Code, Codepoint, Xcode",
