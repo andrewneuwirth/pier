@@ -1,5 +1,6 @@
 import AppKit
 import MacToolsKit
+import MacToolsUpdates
 
 // Pure-logic checks (the family's stand-in for a test target): nothing is started, the Dock is untouched.
 if CommandLine.arguments.contains("--self-check") {
@@ -77,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let firstRun = !UserDefaults.standard.bool(forKey: "onboarded") && !FileManager.default.fileExists(atPath: GroupsFile.url.path)
         if !firstRun { DockBadges.requestAccessOnce() }   // unread badges and raising one exact window; new users get the walkthrough's page
         dock = DockController()
+        AppUpdater.start()
         if firstRun, let dock { CustomizeWindow.show(dock.model, walkthrough: true) }
     }
 }

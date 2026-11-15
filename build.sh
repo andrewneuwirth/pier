@@ -27,11 +27,15 @@ cp Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # drawn once with Kit's tools/icon-tile.swift (8e9bc4, dock.rectangle)
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
+# Sparkle (updates): embedded and its helpers signed inside-out before the app, see Kit's docs/updates.md.
+KIT=../Kit; [ -d "$KIT" ] || KIT=.build/checkouts/mac-tools-kit
+
 IDENTITY=${SIGN_IDENTITY:-}
 if [ "$RELEASE" = 1 ]; then
   [ -n "$IDENTITY" ] || IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')
   [ -n "$IDENTITY" ] || { echo "No Developer ID Application identity in the keychain" >&2; exit 1; }
   echo "==> Signing for release with $IDENTITY"
+  "$KIT/tools/embed-sparkle.sh" "$APP" "$IDENTITY" --release
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
   echo "Built $APP (release)"; exit 0
@@ -39,9 +43,11 @@ fi
 [ -n "$IDENTITY" ] || IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
 if [ -n "$IDENTITY" ]; then
   echo "==> Signing with $IDENTITY"
+  "$KIT/tools/embed-sparkle.sh" "$APP" "$IDENTITY"
   codesign --force --options runtime --sign "$IDENTITY" "$APP"
 else
   echo "==> No Apple Development identity; ad-hoc signing (permissions must be re-granted after each build)"
+  "$KIT/tools/embed-sparkle.sh" "$APP" -
   codesign --force --sign - "$APP"
 fi
 

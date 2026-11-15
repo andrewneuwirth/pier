@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MacToolsKit
+import MacToolsUpdates
 
 /// NSWorkspace icons are expensive to fetch on every redraw.
 @MainActor
@@ -123,6 +124,7 @@ struct DockView: View {
                 }
             }
             Toggle("Open at Login", isOn: $openAtLogin)
+            CheckForUpdatesButton()
             Divider()
             Button("Quit Pier") { controller.quit() }
         }

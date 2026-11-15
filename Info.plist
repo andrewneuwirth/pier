@@ -13,9 +13,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.1.1</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -24,6 +24,14 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://newitools.app/pier/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>xSzU+UV/BhusD16KFG4/N+o/hcfAOiLS+rGWVKcmtyw=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>NSDownloadsFolderUsageDescription</key>
     <string>Pier shows your newest downloads in the Downloads grid.</string>
 </dict>

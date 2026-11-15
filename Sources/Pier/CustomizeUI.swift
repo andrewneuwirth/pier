@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MacToolsKit
+import MacToolsUpdates
 
 /// Customize Pier (right-click the bar), and the same pages as a walkthrough on the first launch.
 @MainActor
@@ -36,7 +37,7 @@ enum CustomizeWindow {
 }
 
 enum Page: String, CaseIterable, Identifiable, Hashable {
-    case widgets = "Widgets", groups = "App Groups", permissions = "Permissions", search = "Search"
+    case widgets = "Widgets", groups = "App Groups", permissions = "Permissions", search = "Search", updates = "Updates"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -44,6 +45,7 @@ enum Page: String, CaseIterable, Identifiable, Hashable {
         case .groups: "square.grid.2x2.fill"
         case .permissions: "lock.shield.fill"
         case .search: "magnifyingglass"
+        case .updates: "arrow.down.circle.fill"
         }
     }
     var tint: Color {
@@ -52,6 +54,7 @@ enum Page: String, CaseIterable, Identifiable, Hashable {
         case .groups: .orange
         case .permissions: .green
         case .search: .purple
+        case .updates: .gray
         }
     }
 
@@ -62,6 +65,7 @@ enum Page: String, CaseIterable, Identifiable, Hashable {
         case .groups: GroupsPage(model: model, offerImport: walkthrough)
         case .permissions: PermissionsPage()
         case .search: SearchPage()
+        case .updates: Form { AppUpdateSettings() }.formStyle(.grouped)
         }
     }
 }
